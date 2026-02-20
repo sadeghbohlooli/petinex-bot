@@ -323,14 +323,23 @@ async def admin_reply_handler(update: Update, context: ContextTypes.DEFAULT_TYPE
 
 
 def main():
+    """Start the bot"""
     if not BOT_TOKEN:
         print("❌ BOT_TOKEN not set!")
         return
     if not ADMIN_CHAT_ID:
         print("❌ ADMIN_CHAT_ID not set!")
         return
+
     print("🚀 Starting Petinex Bot...")
-    app = Application.builder().token(BOT_TOKEN).build()
+
+    try:
+        app = Application.builder().token(BOT_TOKEN).build()
+    except Exception as e:
+        print(f"❌ Failed to build application: {e}")
+        import sys
+        sys.exit(1)
+
     app.add_handler(CommandHandler("start", cmd_start))
     app.add_handler(CommandHandler("stats", cmd_stats))
     app.add_handler(CallbackQueryHandler(callback_handler))
@@ -348,8 +357,14 @@ def main():
             admin_reply_handler,
         )
     )
+
     print("✅ Petinex Bot is running!")
-    app.run_polling(drop_pending_updates=True)
+    print("📊 Bot is polling for updates...")
+
+    app.run_polling(
+        drop_pending_updates=True,
+        allowed_updates=["message", "callback_query"],
+    )
 
 
 if __name__ == "__main__":
