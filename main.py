@@ -1,11 +1,11 @@
 import logging
 from datetime import datetime
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram import Update, ReplyKeyboardMarkup, ReplyKeyboardRemove, KeyboardButton
 from telegram.ext import (
     Application,
     CommandHandler,
-    CallbackQueryHandler,
     MessageHandler,
+    ConversationHandler,
     filters,
     ContextTypes,
 )
@@ -28,6 +28,11 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+# ─── Conversation States ───
+WAITING_START = 0
+ANSWERING = 1
+MULTI_SELECT = 2
+
 user_sessions = {}
 
 
@@ -46,59 +51,57 @@ def reset_session(uid: int):
     user_sessions.pop(uid, None)
 
 
-def build_keyboard(question: dict) -> InlineKeyboardMarkup:
+# ─── Build ReplyKeyboard from question options ───
+def build_reply_keyboard(question: dict) -> ReplyKeyboardMarkup:
+    """Build a ReplyKeyboardMarkup from question options."""
     rows = []
-    if question["type"] == "inline_button":
-        for opt in question["options"]:
-            rows.append(
-                [InlineKeyboardButton(
-                    text=opt["text"],
-                    callback_data=f"a|{question['id']}|{opt['value']}",
-                )]
-            )
-    elif question["type"] == "multi_select":
-        for opt in question["options"]:
-            rows.append(
-                [InlineKeyboardButton(
-                    text=opt["text"],
-                    callback_data=f"m|{question['id']}|{opt['value']}",
-                )]
-            )
-        rows.append(
-            [InlineKeyboardButton(
-                text=question.get("confirm_button", "✅ تمام"),
-                callback_data=f"done|{question['id']}",
-            )]
-        )
-    return InlineKeyboardMarkup(rows)
+    row = []
+    for opt in question["options"]:
+        row.append(KeyboardButton(opt["text"]))
+        if len(row) == 2:
+            rows.append(row)
+            row = []
+    if row:
+        rows.append(row)
+    return ReplyKeyboardMarkup(rows, resize_keyboard=True, one_time_keyboard=True)
 
 
-def build_multi_keyboard(question: dict, selected: list) -> InlineKeyboardMarkup:
+def build_multi_reply_keyboard(question: dict, selected: list) -> ReplyKeyboardMarkup:
+    """Build keyboard for multi-select with checkmarks and confirm button."""
     rows = []
+    row = []
     for opt in question["options"]:
         check = " ✅" if opt["value"] in selected else ""
-        rows.append(
-            [InlineKeyboardButton(
-                text=opt["text"] + check,
-                callback_data=f"m|{question['id']}|{opt['value']}",
-            )]
-        )
-    rows.append(
-        [InlineKeyboardButton(
-            text=question.get("confirm_button", "✅ تمام"),
-            callback_data=f"done|{question['id']}",
-        )]
-    )
-    return InlineKeyboardMarkup(rows)
+        row.append(KeyboardButton(opt["text"] + check))
+        if len(row) == 2:
+            rows.append(row)
+            row = []
+    if row:
+        rows.append(row)
+    # Add confirm button at the bottom
+    confirm_text = question.get("confirm_button", "✅ تأیید و ادامه")
+    rows.append([KeyboardButton(confirm_text)])
+    return ReplyKeyboardMarkup(rows, resize_keyboard=True, one_time_keyboard=False)
 
 
-async def send_question(uid: int, context: ContextTypes.DEFAULT_TYPE):
+def find_option_value(question: dict, user_text: str) -> str | None:
+    """Find the option value matching the user's text (with or without checkmark)."""
+    clean_text = user_text.replace(" ✅", "").strip()
+    for opt in question["options"]:
+        if opt["text"] == clean_text or opt["text"] == user_text:
+            return opt["value"]
+    return None
+
+
+# ─── Send question to user ───
+async def send_question(uid: int, context: ContextTypes.DEFAULT_TYPE) -> int:
     session = get_session(uid)
     qid = session["current_question"]
     question = get_question_by_id(qid)
     if not question:
-        return
+        return ConversationHandler.END
 
+    # Section transition message
     prev_q = get_question_by_id(qid - 1)
     if prev_q is None or prev_q["section"] != question["section"]:
         transition = TRANSITIONS.get(f"section_{question['section']}", "")
@@ -113,24 +116,43 @@ async def send_question(uid: int, context: ContextTypes.DEFAULT_TYPE):
         text += f"\n\n{question['micro_copy']}"
 
     if question["type"] == "text_input":
-        await context.bot.send_message(chat_id=uid, text=text, parse_mode="HTML")
-    else:
-        kb = build_keyboard(question)
+        await context.bot.send_message(
+            chat_id=uid,
+            text=text,
+            parse_mode="HTML",
+            reply_markup=ReplyKeyboardRemove(),
+        )
+        return ANSWERING
+
+    elif question["type"] == "multi_select":
+        session["multi_select_temp"] = []
+        kb = build_multi_reply_keyboard(question, [])
         await context.bot.send_message(
             chat_id=uid, text=text, reply_markup=kb, parse_mode="HTML"
         )
+        return MULTI_SELECT
+
+    else:
+        # inline_button → now ReplyKeyboard
+        kb = build_reply_keyboard(question)
+        await context.bot.send_message(
+            chat_id=uid, text=text, reply_markup=kb, parse_mode="HTML"
+        )
+        return ANSWERING
 
 
-async def advance(uid: int, context: ContextTypes.DEFAULT_TYPE):
+async def advance(uid: int, context: ContextTypes.DEFAULT_TYPE) -> int:
     session = get_session(uid)
     next_id = session["current_question"] + 1
     if next_id > get_total_questions():
         await finish_assessment(uid, context)
+        return ConversationHandler.END
     else:
         session["current_question"] = next_id
-        await send_question(uid, context)
+        return await send_question(uid, context)
 
 
+# ─── Finish Assessment (unchanged logic) ───
 async def finish_assessment(uid: int, context: ContextTypes.DEFAULT_TYPE):
     session = get_session(uid)
     try:
@@ -163,23 +185,32 @@ async def finish_assessment(uid: int, context: ContextTypes.DEFAULT_TYPE):
         await context.bot.send_message(chat_id=ADMIN_CHAT_ID, text=prefix + chunk)
 
     await context.bot.send_message(
-        chat_id=uid, text=COMPLETION_MESSAGE, parse_mode="HTML"
+        chat_id=uid,
+        text=COMPLETION_MESSAGE,
+        parse_mode="HTML",
+        reply_markup=ReplyKeyboardRemove(),
     )
     reset_session(uid)
     logger.info(f"Assessment completed for user {uid} ({full_name})")
 
 
-async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+# ─── /start Command ───
+async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     uid = update.effective_user.id
     reset_session(uid)
-    kb = InlineKeyboardMarkup(
-        [[InlineKeyboardButton(START_BUTTON_TEXT, callback_data="go")]]
+
+    kb = ReplyKeyboardMarkup(
+        [[KeyboardButton(START_BUTTON_TEXT)]],
+        resize_keyboard=True,
+        one_time_keyboard=True,
     )
     await update.message.reply_text(
         WELCOME_MESSAGE, reply_markup=kb, parse_mode="HTML"
     )
+    return WAITING_START
 
 
+# ─── /stats Command (admin only) ───
 async def cmd_stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id != ADMIN_CHAT_ID:
         await update.message.reply_text("⛔ فقط ادمین دسترسی داره.")
@@ -191,98 +222,140 @@ async def cmd_stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 
-async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    await query.answer()
+# ─── Handle "Start" button press ───
+async def handle_start_button(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     uid = update.effective_user.id
-    data = query.data
+    user_text = update.message.text.strip()
 
-    if data == "go":
+    if user_text == START_BUTTON_TEXT:
         session = get_session(uid)
         session["current_question"] = 1
-        await send_question(uid, context)
-        return
-
-    if data.startswith("a|"):
-        parts = data.split("|", 2)
-        qid = int(parts[1])
-        value = parts[2]
-        session = get_session(uid)
-        question = get_question_by_id(qid)
-        if question:
-            session["answers"][question["variable"]] = value
-        await advance(uid, context)
-        return
-
-    if data.startswith("m|"):
-        parts = data.split("|", 2)
-        qid = int(parts[1])
-        value = parts[2]
-        session = get_session(uid)
-        question = get_question_by_id(qid)
-        if not question:
-            return
-        temp = session["multi_select_temp"]
-        if value == "none":
-            session["multi_select_temp"] = ["none"]
-        else:
-            if "none" in temp:
-                temp.remove("none")
-            if value in temp:
-                temp.remove(value)
-            else:
-                temp.append(value)
-        new_kb = build_multi_keyboard(question, session["multi_select_temp"])
-        total = get_total_questions()
-        text = f"<b>سؤال {qid} از {total}</b>\n\n{question['text']}"
-        if question.get("micro_copy"):
-            text += f"\n\n{question['micro_copy']}"
-        try:
-            await query.edit_message_text(
-                text=text, reply_markup=new_kb, parse_mode="HTML"
-            )
-        except Exception:
-            pass
-        return
-
-    if data.startswith("done|"):
-        parts = data.split("|", 1)
-        qid = int(parts[1])
-        session = get_session(uid)
-        question = get_question_by_id(qid)
-        if not question:
-            return
-        final = session["multi_select_temp"] if session["multi_select_temp"] else ["none"]
-        session["answers"][question["variable"]] = final
-        session["multi_select_temp"] = []
-        await advance(uid, context)
-        return
+        return await send_question(uid, context)
+    else:
+        await update.message.reply_text("👇 لطفاً دکمه شروع رو بزن!")
+        return WAITING_START
 
 
-async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+# ─── Handle Regular Answer (inline_button + text_input) ───
+async def handle_answer(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     uid = update.effective_user.id
     session = get_session(uid)
     qid = session.get("current_question", 0)
     if qid == 0:
-        return
+        return ConversationHandler.END
+
     question = get_question_by_id(qid)
-    if not question or question["type"] != "text_input":
-        return
-    text = update.message.text.strip()
-    if question["variable"] in ("age_months", "weight_kg"):
-        cleaned = text.replace(",", ".").replace("٫", ".")
-        try:
-            float(cleaned)
-            text = cleaned
-        except ValueError:
+    if not question:
+        return ConversationHandler.END
+
+    user_text = update.message.text.strip()
+
+    if question["type"] == "text_input":
+        # Validate numeric fields
+        if question["variable"] in ("age_months", "weight_kg"):
+            cleaned = user_text.replace(",", ".").replace("٫", ".")
+            try:
+                float(cleaned)
+                user_text = cleaned
+            except ValueError:
+                await update.message.reply_text(
+                    "❌ لطفاً یک عدد معتبر وارد کن.\nمثلاً: 8.5 یا 24"
+                )
+                return ANSWERING
+
+        session["answers"][question["variable"]] = user_text
+        return await advance(uid, context)
+
+    elif question["type"] == "inline_button":
+        # Find matching option
+        value = find_option_value(question, user_text)
+        if value is None:
             await update.message.reply_text(
-                "❌ لطفاً یک عدد معتبر وارد کن.\nمثلاً: 8.5 یا 24"
+                "⚠️ لطفاً یکی از گزینه‌های موجود رو انتخاب کن!"
             )
-            return
-    session["answers"][question["variable"]] = text
-    await advance(uid, context)
+            return ANSWERING
+
+        session["answers"][question["variable"]] = value
+        return await advance(uid, context)
+
+    return ANSWERING
 
 
+# ─── Handle Multi-Select Answer ───
+async def handle_multi_select(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    uid = update.effective_user.id
+    session = get_session(uid)
+    qid = session.get("current_question", 0)
+    question = get_question_by_id(qid)
+
+    if not question:
+        return ConversationHandler.END
+
+    user_text = update.message.text.strip()
+    confirm_text = question.get("confirm_button", "✅ تأیید و ادامه")
+
+    # User pressed confirm button
+    if user_text == confirm_text:
+        final = session["multi_select_temp"] if session["multi_select_temp"] else ["none"]
+        session["answers"][question["variable"]] = final
+        session["multi_select_temp"] = []
+
+        # Show final selection summary
+        if final != ["none"]:
+            selected_texts = []
+            for v in final:
+                for opt in question["options"]:
+                    if opt["value"] == v:
+                        selected_texts.append(opt["text"])
+            await update.message.reply_text(
+                f"✅ انتخاب‌های شما:\n" + "\n".join(f"  • {t}" for t in selected_texts)
+            )
+
+        return await advance(uid, context)
+
+    # User selected/deselected an option
+    clean_text = user_text.replace(" ✅", "").strip()
+    value = None
+    for opt in question["options"]:
+        if opt["text"] == clean_text:
+            value = opt["value"]
+            break
+
+    if value is None:
+        await update.message.reply_text(
+            "⚠️ لطفاً یکی از گزینه‌ها رو انتخاب کن یا دکمه تأیید رو بزن!"
+        )
+        return MULTI_SELECT
+
+    temp = session["multi_select_temp"]
+    if value == "none":
+        session["multi_select_temp"] = ["none"]
+    else:
+        if "none" in temp:
+            temp.remove("none")
+        if value in temp:
+            temp.remove(value)
+            # Notify deselection
+            await update.message.reply_text(f"❌ حذف شد: {clean_text}")
+        else:
+            temp.append(value)
+            # Notify selection
+            await update.message.reply_text(f"✅ اضافه شد: {clean_text}")
+
+    # Resend keyboard with updated checkmarks
+    total = get_total_questions()
+    text = f"<b>سؤال {qid} از {total}</b>\n\n{question['text']}"
+    if question.get("micro_copy"):
+        text += f"\n\n{question['micro_copy']}"
+
+    kb = build_multi_reply_keyboard(question, session["multi_select_temp"])
+    await update.message.reply_text(
+        text=text, reply_markup=kb, parse_mode="HTML"
+    )
+    return MULTI_SELECT
+
+
+# ─── Admin Reply Handler (unchanged) ───
 async def admin_reply_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     msg = update.message
     if msg.chat_id != ADMIN_CHAT_ID:
@@ -322,8 +395,8 @@ async def admin_reply_handler(update: Update, context: ContextTypes.DEFAULT_TYPE
         await msg.reply_text(f"❌ خطا: {e}")
 
 
+# ─── Main ───
 def main():
-    """Start the bot"""
     if not BOT_TOKEN:
         print("❌ BOT_TOKEN not set!")
         return
@@ -340,15 +413,34 @@ def main():
         import sys
         sys.exit(1)
 
-    app.add_handler(CommandHandler("start", cmd_start))
-    app.add_handler(CommandHandler("stats", cmd_stats))
-    app.add_handler(CallbackQueryHandler(callback_handler))
-    app.add_handler(
-        MessageHandler(
-            filters.TEXT & ~filters.COMMAND & ~filters.Chat(ADMIN_CHAT_ID),
-            text_handler,
-        )
+    # Conversation handler with states
+    conv_handler = ConversationHandler(
+        entry_points=[CommandHandler("start", cmd_start)],
+        states={
+            WAITING_START: [
+                MessageHandler(
+                    filters.TEXT & ~filters.COMMAND,
+                    handle_start_button,
+                ),
+            ],
+            ANSWERING: [
+                MessageHandler(
+                    filters.TEXT & ~filters.COMMAND,
+                    handle_answer,
+                ),
+            ],
+            MULTI_SELECT: [
+                MessageHandler(
+                    filters.TEXT & ~filters.COMMAND,
+                    handle_multi_select,
+                ),
+            ],
+        },
+        fallbacks=[CommandHandler("start", cmd_start)],
     )
+
+    app.add_handler(conv_handler)
+    app.add_handler(CommandHandler("stats", cmd_stats))
     app.add_handler(
         MessageHandler(
             filters.Chat(ADMIN_CHAT_ID)
@@ -363,7 +455,7 @@ def main():
 
     app.run_polling(
         drop_pending_updates=True,
-        allowed_updates=["message", "callback_query"],
+        allowed_updates=["message"],
     )
 
 
