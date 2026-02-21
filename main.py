@@ -588,9 +588,7 @@ async def post_init(application):
     commands = [
         BotCommand("start", "🐾 شروع ربات"),
         BotCommand("health", "🩺 گزارش سلامت پت"),
-        BotCommand("diet", "🥗 دریافت رژیم غذایی"),
         BotCommand("support", "📞 پشتیبانی سریع"),
-        BotCommand("stats", "📊 آمار (ادمین)"),
     ]
     await application.bot.set_my_commands(commands)
     logger.info("✅ Bot menu commands set successfully!")
