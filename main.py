@@ -1,6 +1,6 @@
 import logging
 from datetime import datetime
-from telegram import Update, ReplyKeyboardMarkup, ReplyKeyboardRemove, KeyboardButton
+from telegram import Update, ReplyKeyboardMarkup, ReplyKeyboardRemove, KeyboardButton, BotCommand
 from telegram.ext import (
     Application,
     CommandHandler,
@@ -37,7 +37,7 @@ user_sessions = {}
 
 # ─── Menu Button Labels ───
 BTN_HEALTH_REPORT = "🩺 گزارش سلامت پت"
-BTN_DIET = "🥗 دریافت رژیم غذایی"              # ← جدید
+BTN_DIET = "🥗 دریافت رژیم غذایی"
 BTN_VET_ONLINE = "👨‍⚕️ دامپزشک (آنلاین)"
 BTN_CLINIC = "🏥 کلینیک"
 BTN_PET_SHOP = "🛒 پت‌شاپ"
@@ -50,7 +50,7 @@ BTN_SUPPORT = "📞 پشتیبانی سریع"
 
 # ─── Menu Responses ───
 MENU_RESPONSES = {
-    BTN_DIET: (                                   # ← جدید
+    BTN_DIET: (
         "🥗 <b>دریافت رژیم غذایی</b>\n\n"
         "🔜 این سرویس به‌زودی فعال می‌شه!\n\n"
         "📌 رژیم غذایی اختصاصی متناسب با نژاد، سن و وضعیت سلامت پت شما.\n\n"
@@ -133,13 +133,13 @@ def reset_session(uid: int):
 def get_main_menu_keyboard() -> ReplyKeyboardMarkup:
     """Build the persistent main menu keyboard."""
     keyboard = [
-        [KeyboardButton(BTN_HEALTH_REPORT)],                                    # ← تنها = بزرگ
-        [KeyboardButton(BTN_DIET), KeyboardButton(BTN_VET_ONLINE)],             # ← رژیم غذایی جدید
+        [KeyboardButton(BTN_HEALTH_REPORT)],
+        [KeyboardButton(BTN_DIET), KeyboardButton(BTN_VET_ONLINE)],
         [KeyboardButton(BTN_CLINIC), KeyboardButton(BTN_PET_SHOP)],
         [KeyboardButton(BTN_BOARDING), KeyboardButton(BTN_PHARMACY)],
         [KeyboardButton(BTN_GROOMER), KeyboardButton(BTN_TRAINER)],
         [KeyboardButton(BTN_EDUCATION)],
-        [KeyboardButton(BTN_SUPPORT)],                                           # ← تنها = بزرگ
+        [KeyboardButton(BTN_SUPPORT)],
     ]
     return ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
 
@@ -299,7 +299,7 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
         "🐾 <b>به پتینکس خوش آمدید!</b>\n\n"
         "🏠 از منوی زیر یکی از خدمات رو انتخاب کن:\n\n"
         "🩺 <b>گزارش سلامت پت</b> — ارزیابی هوشمند سلامت حیوانت\n"
-        "🥗 <b>دریافت رژیم غذایی</b> — رژیم اختصاصی پت شما\n"            # ← جدید
+        "🥗 <b>دریافت رژیم غذایی</b> — رژیم اختصاصی پت شما\n"
         "👨‍⚕️ <b>دامپزشک آنلاین</b> — مشاوره با متخصص\n"
         "🏥 <b>کلینیک</b> — پیدا کردن کلینیک نزدیک\n"
         "🛒 <b>پت‌شاپ</b> — خرید لوازم و غذا\n"
@@ -314,6 +314,47 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
 
     await update.message.reply_text(
         welcome,
+        parse_mode="HTML",
+        reply_markup=get_main_menu_keyboard(),
+    )
+    return MAIN_MENU
+
+
+# ─── /health Command (shortcut) ───
+async def cmd_health(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Shortcut: directly start health assessment via /health command."""
+    uid = update.effective_user.id
+    reset_session(uid)
+    session = get_session(uid)
+    session["current_question"] = 1
+
+    await update.message.reply_text(
+        "🩺 <b>شروع ارزیابی سلامت پت</b>\n\n"
+        "📝 الان چند تا سؤال ازت می‌پرسم.\n"
+        "⏱ حدود ۲ تا ۳ دقیقه وقتت رو می‌گیره.\n\n"
+        "❌ هر لحظه می‌تونی «انصراف و بازگشت» رو بزنی.\n\n"
+        "بزن بریم! 👇",
+        parse_mode="HTML",
+    )
+    return await send_question(uid, context)
+
+
+# ─── /diet Command (shortcut) ───
+async def cmd_diet(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Shortcut: show diet info via /diet command."""
+    await update.message.reply_text(
+        MENU_RESPONSES[BTN_DIET],
+        parse_mode="HTML",
+        reply_markup=get_main_menu_keyboard(),
+    )
+    return MAIN_MENU
+
+
+# ─── /support Command (shortcut) ───
+async def cmd_support(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Shortcut: show support info via /support command."""
+    await update.message.reply_text(
+        MENU_RESPONSES[BTN_SUPPORT],
         parse_mode="HTML",
         reply_markup=get_main_menu_keyboard(),
     )
@@ -541,6 +582,20 @@ async def admin_reply_handler(update: Update, context: ContextTypes.DEFAULT_TYPE
         await msg.reply_text(f"❌ خطا: {e}")
 
 
+# ─── Auto-set Bot Menu Commands (☰ button) ───
+async def post_init(application):
+    """Set bot commands so the ☰ menu button appears in Telegram."""
+    commands = [
+        BotCommand("start", "🐾 شروع ربات"),
+        BotCommand("health", "🩺 گزارش سلامت پت"),
+        BotCommand("diet", "🥗 دریافت رژیم غذایی"),
+        BotCommand("support", "📞 پشتیبانی سریع"),
+        BotCommand("stats", "📊 آمار (ادمین)"),
+    ]
+    await application.bot.set_my_commands(commands)
+    logger.info("✅ Bot menu commands set successfully!")
+
+
 # ─── Main ───
 def main():
     if not BOT_TOKEN:
@@ -553,14 +608,19 @@ def main():
     print("🚀 Starting Petinex Bot...")
 
     try:
-        app = Application.builder().token(BOT_TOKEN).build()
+        app = Application.builder().token(BOT_TOKEN).post_init(post_init).build()
     except Exception as e:
         print(f"❌ Failed to build application: {e}")
         import sys
         sys.exit(1)
 
     conv_handler = ConversationHandler(
-        entry_points=[CommandHandler("start", cmd_start)],
+        entry_points=[
+            CommandHandler("start", cmd_start),
+            CommandHandler("health", cmd_health),
+            CommandHandler("diet", cmd_diet),
+            CommandHandler("support", cmd_support),
+        ],
         states={
             MAIN_MENU: [
                 MessageHandler(
@@ -581,7 +641,12 @@ def main():
                 ),
             ],
         },
-        fallbacks=[CommandHandler("start", cmd_start)],
+        fallbacks=[
+            CommandHandler("start", cmd_start),
+            CommandHandler("health", cmd_health),
+            CommandHandler("diet", cmd_diet),
+            CommandHandler("support", cmd_support),
+        ],
     )
 
     app.add_handler(conv_handler)
