@@ -29,14 +29,15 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # ─── Conversation States ───
-MAIN_MENU = 0          # ← تغییر: WAITING_START → MAIN_MENU
+MAIN_MENU = 0
 ANSWERING = 1
 MULTI_SELECT = 2
 
 user_sessions = {}
 
-# ─── Menu Button Labels ───                    # ← اضافه شده
+# ─── Menu Button Labels ───
 BTN_HEALTH_REPORT = "🩺 گزارش سلامت پت"
+BTN_DIET = "🥗 دریافت رژیم غذایی"              # ← جدید
 BTN_VET_ONLINE = "👨‍⚕️ دامپزشک (آنلاین)"
 BTN_CLINIC = "🏥 کلینیک"
 BTN_PET_SHOP = "🛒 پت‌شاپ"
@@ -47,8 +48,14 @@ BTN_TRAINER = "🎓 مربی (رفتاری · تربیتی)"
 BTN_EDUCATION = "📚 آموزش اختصاصی"
 BTN_SUPPORT = "📞 پشتیبانی سریع"
 
-# ─── Menu Responses ───                         # ← اضافه شده
+# ─── Menu Responses ───
 MENU_RESPONSES = {
+    BTN_DIET: (                                   # ← جدید
+        "🥗 <b>دریافت رژیم غذایی</b>\n\n"
+        "🔜 این سرویس به‌زودی فعال می‌شه!\n\n"
+        "📌 رژیم غذایی اختصاصی متناسب با نژاد، سن و وضعیت سلامت پت شما.\n\n"
+        "🔔 داریم با متخصصین تغذیه دامپزشکی روش کار می‌کنیم!"
+    ),
     BTN_VET_ONLINE: (
         "👨‍⚕️ <b>دامپزشک آنلاین</b>\n\n"
         "🔜 این سرویس به‌زودی فعال می‌شه!\n\n"
@@ -122,15 +129,17 @@ def reset_session(uid: int):
     user_sessions.pop(uid, None)
 
 
-# ─── Main Menu Keyboard ───                     # ← اضافه شده
+# ─── Main Menu Keyboard ───
 def get_main_menu_keyboard() -> ReplyKeyboardMarkup:
     """Build the persistent main menu keyboard."""
     keyboard = [
-        [KeyboardButton(BTN_HEALTH_REPORT), KeyboardButton(BTN_VET_ONLINE)],
+        [KeyboardButton(BTN_HEALTH_REPORT)],                                    # ← تنها = بزرگ
+        [KeyboardButton(BTN_DIET), KeyboardButton(BTN_VET_ONLINE)],             # ← رژیم غذایی جدید
         [KeyboardButton(BTN_CLINIC), KeyboardButton(BTN_PET_SHOP)],
         [KeyboardButton(BTN_BOARDING), KeyboardButton(BTN_PHARMACY)],
         [KeyboardButton(BTN_GROOMER), KeyboardButton(BTN_TRAINER)],
-        [KeyboardButton(BTN_EDUCATION), KeyboardButton(BTN_SUPPORT)],
+        [KeyboardButton(BTN_EDUCATION)],
+        [KeyboardButton(BTN_SUPPORT)],                                           # ← تنها = بزرگ
     ]
     return ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
 
@@ -147,7 +156,6 @@ def build_reply_keyboard(question: dict) -> ReplyKeyboardMarkup:
             row = []
     if row:
         rows.append(row)
-    # ← اضافه شده: دکمه انصراف
     rows.append([KeyboardButton("❌ انصراف و بازگشت")])
     return ReplyKeyboardMarkup(rows, resize_keyboard=True, one_time_keyboard=True)
 
@@ -164,10 +172,8 @@ def build_multi_reply_keyboard(question: dict, selected: list) -> ReplyKeyboardM
             row = []
     if row:
         rows.append(row)
-    # Add confirm button at the bottom
     confirm_text = question.get("confirm_button", "✅ تأیید و ادامه")
     rows.append([KeyboardButton(confirm_text)])
-    # ← اضافه شده: دکمه انصراف
     rows.append([KeyboardButton("❌ انصراف و بازگشت")])
     return ReplyKeyboardMarkup(rows, resize_keyboard=True, one_time_keyboard=False)
 
@@ -189,7 +195,6 @@ async def send_question(uid: int, context: ContextTypes.DEFAULT_TYPE) -> int:
     if not question:
         return ConversationHandler.END
 
-    # Section transition message
     prev_q = get_question_by_id(qid - 1)
     if prev_q is None or prev_q["section"] != question["section"]:
         transition = TRANSITIONS.get(f"section_{question['section']}", "")
@@ -204,7 +209,6 @@ async def send_question(uid: int, context: ContextTypes.DEFAULT_TYPE) -> int:
         text += f"\n\n{question['micro_copy']}"
 
     if question["type"] == "text_input":
-        # ← تغییر: به جای ReplyKeyboardRemove → کیبورد با دکمه انصراف
         cancel_kb = ReplyKeyboardMarkup(
             [[KeyboardButton("❌ انصراف و بازگشت")]],
             resize_keyboard=True,
@@ -226,7 +230,6 @@ async def send_question(uid: int, context: ContextTypes.DEFAULT_TYPE) -> int:
         return MULTI_SELECT
 
     else:
-        # inline_button → now ReplyKeyboard
         kb = build_reply_keyboard(question)
         await context.bot.send_message(
             chat_id=uid, text=text, reply_markup=kb, parse_mode="HTML"
@@ -239,13 +242,13 @@ async def advance(uid: int, context: ContextTypes.DEFAULT_TYPE) -> int:
     next_id = session["current_question"] + 1
     if next_id > get_total_questions():
         await finish_assessment(uid, context)
-        return MAIN_MENU          # ← تغییر: END → MAIN_MENU
+        return MAIN_MENU
     else:
         session["current_question"] = next_id
         return await send_question(uid, context)
 
 
-# ─── Finish Assessment (unchanged logic) ───
+# ─── Finish Assessment ───
 async def finish_assessment(uid: int, context: ContextTypes.DEFAULT_TYPE):
     session = get_session(uid)
     try:
@@ -277,7 +280,6 @@ async def finish_assessment(uid: int, context: ContextTypes.DEFAULT_TYPE):
         prefix = f"📄 بخش {i + 1}/{len(chunks)}:\n\n" if len(chunks) > 1 else ""
         await context.bot.send_message(chat_id=ADMIN_CHAT_ID, text=prefix + chunk)
 
-    # ← تغییر: به جای ReplyKeyboardRemove → منوی اصلی
     await context.bot.send_message(
         chat_id=uid,
         text=COMPLETION_MESSAGE,
@@ -289,7 +291,6 @@ async def finish_assessment(uid: int, context: ContextTypes.DEFAULT_TYPE):
 
 
 # ─── /start Command ───
-# ← تغییر: منوی اصلی به جای دکمه شروع
 async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     uid = update.effective_user.id
     reset_session(uid)
@@ -298,6 +299,7 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
         "🐾 <b>به پتینکس خوش آمدید!</b>\n\n"
         "🏠 از منوی زیر یکی از خدمات رو انتخاب کن:\n\n"
         "🩺 <b>گزارش سلامت پت</b> — ارزیابی هوشمند سلامت حیوانت\n"
+        "🥗 <b>دریافت رژیم غذایی</b> — رژیم اختصاصی پت شما\n"            # ← جدید
         "👨‍⚕️ <b>دامپزشک آنلاین</b> — مشاوره با متخصص\n"
         "🏥 <b>کلینیک</b> — پیدا کردن کلینیک نزدیک\n"
         "🛒 <b>پت‌شاپ</b> — خرید لوازم و غذا\n"
@@ -330,7 +332,6 @@ async def cmd_stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 
-# ← تغییر: handle_start_button → handle_main_menu
 # ─── Handle Main Menu Selection ───
 async def handle_main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     uid = update.effective_user.id
@@ -370,7 +371,7 @@ async def handle_main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     return MAIN_MENU
 
 
-# ─── Handle Cancel (return to menu) ───          # ← اضافه شده
+# ─── Handle Cancel (return to menu) ───
 async def handle_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     uid = update.effective_user.id
     reset_session(uid)
@@ -387,21 +388,19 @@ async def handle_answer(update: Update, context: ContextTypes.DEFAULT_TYPE) -> i
     uid = update.effective_user.id
     user_text = update.message.text.strip()
 
-    # ← اضافه شده: چک انصراف
     if user_text == "❌ انصراف و بازگشت":
         return await handle_cancel(update, context)
 
     session = get_session(uid)
     qid = session.get("current_question", 0)
     if qid == 0:
-        return MAIN_MENU          # ← تغییر: END → MAIN_MENU
+        return MAIN_MENU
 
     question = get_question_by_id(qid)
     if not question:
-        return MAIN_MENU          # ← تغییر: END → MAIN_MENU
+        return MAIN_MENU
 
     if question["type"] == "text_input":
-        # Validate numeric fields
         if question["variable"] in ("age_months", "weight_kg"):
             cleaned = user_text.replace(",", ".").replace("٫", ".")
             try:
@@ -417,7 +416,6 @@ async def handle_answer(update: Update, context: ContextTypes.DEFAULT_TYPE) -> i
         return await advance(uid, context)
 
     elif question["type"] == "inline_button":
-        # Find matching option
         value = find_option_value(question, user_text)
         if value is None:
             await update.message.reply_text(
@@ -436,7 +434,6 @@ async def handle_multi_select(update: Update, context: ContextTypes.DEFAULT_TYPE
     uid = update.effective_user.id
     user_text = update.message.text.strip()
 
-    # ← اضافه شده: چک انصراف
     if user_text == "❌ انصراف و بازگشت":
         return await handle_cancel(update, context)
 
@@ -445,17 +442,15 @@ async def handle_multi_select(update: Update, context: ContextTypes.DEFAULT_TYPE
     question = get_question_by_id(qid)
 
     if not question:
-        return MAIN_MENU          # ← تغییر: END → MAIN_MENU
+        return MAIN_MENU
 
     confirm_text = question.get("confirm_button", "✅ تأیید و ادامه")
 
-    # User pressed confirm button
     if user_text == confirm_text:
         final = session["multi_select_temp"] if session["multi_select_temp"] else ["none"]
         session["answers"][question["variable"]] = final
         session["multi_select_temp"] = []
 
-        # Show final selection summary
         if final != ["none"]:
             selected_texts = []
             for v in final:
@@ -468,7 +463,6 @@ async def handle_multi_select(update: Update, context: ContextTypes.DEFAULT_TYPE
 
         return await advance(uid, context)
 
-    # User selected/deselected an option
     clean_text = user_text.replace(" ✅", "").strip()
     value = None
     for opt in question["options"]:
@@ -490,14 +484,11 @@ async def handle_multi_select(update: Update, context: ContextTypes.DEFAULT_TYPE
             temp.remove("none")
         if value in temp:
             temp.remove(value)
-            # Notify deselection
             await update.message.reply_text(f"❌ حذف شد: {clean_text}")
         else:
             temp.append(value)
-            # Notify selection
             await update.message.reply_text(f"✅ اضافه شد: {clean_text}")
 
-    # Resend keyboard with updated checkmarks
     total = get_total_questions()
     text = f"<b>سؤال {qid} از {total}</b>\n\n{question['text']}"
     if question.get("micro_copy"):
@@ -510,7 +501,7 @@ async def handle_multi_select(update: Update, context: ContextTypes.DEFAULT_TYPE
     return MULTI_SELECT
 
 
-# ─── Admin Reply Handler (unchanged) ───
+# ─── Admin Reply Handler ───
 async def admin_reply_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     msg = update.message
     if msg.chat_id != ADMIN_CHAT_ID:
@@ -568,11 +559,9 @@ def main():
         import sys
         sys.exit(1)
 
-    # Conversation handler with states
     conv_handler = ConversationHandler(
         entry_points=[CommandHandler("start", cmd_start)],
         states={
-            # ← تغییر: WAITING_START → MAIN_MENU + handle_start_button → handle_main_menu
             MAIN_MENU: [
                 MessageHandler(
                     filters.TEXT & ~filters.COMMAND,
