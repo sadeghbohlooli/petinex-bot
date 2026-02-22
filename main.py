@@ -1,6 +1,17 @@
+# ============================================================
+# Petinex Bot — main.py
+# Compatible with questions.py v2 (33 base + 8 conditional)
+# ============================================================
+
 import logging
 from datetime import datetime
-from telegram import Update, ReplyKeyboardMarkup, ReplyKeyboardRemove, KeyboardButton, BotCommand
+from telegram import (
+    Update,
+    ReplyKeyboardMarkup,
+    ReplyKeyboardRemove,
+    KeyboardButton,
+    BotCommand,
+)
 from telegram.ext import (
     Application,
     CommandHandler,
@@ -13,15 +24,28 @@ from telegram.ext import (
 from config import BOT_TOKEN, ADMIN_CHAT_ID, DEBUG_MODE
 from questions import (
     QUESTIONS,
+    QUESTION_FLOW,
     WELCOME_MESSAGE,
     START_BUTTON_TEXT,
     TRANSITIONS,
     COMPLETION_MESSAGE,
+    SECTION_BOUNDARIES,
     get_question_by_id,
+    get_options_for_question,
+    should_show_question,
+    get_next_question_id,
+    get_section_for_question,
+    get_section_transition,
+    should_show_section_transition,
+    get_first_question_id,
+    calculate_progress,
     get_total_questions,
+    get_total_base_questions,
+    get_total_all_questions,
 )
 from prompt_template import generate_prompt
 
+# ─── Logging ───
 logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
     level=logging.DEBUG if DEBUG_MODE else logging.INFO,
@@ -32,7 +56,9 @@ logger = logging.getLogger(__name__)
 MAIN_MENU = 0
 ANSWERING = 1
 MULTI_SELECT = 2
+OTHER_TEXT = 3       # New state: waiting for free-text after "_other" option
 
+# ─── In-memory sessions ───
 user_sessions = {}
 
 # ─── Menu Button Labels ───
@@ -114,22 +140,34 @@ MENU_RESPONSES = {
 }
 
 
+# ============================================================
+# SESSION MANAGEMENT
+# ============================================================
+
 def get_session(uid: int) -> dict:
+    """Get or create a user session."""
     if uid not in user_sessions:
         user_sessions[uid] = {
-            "current_question": 0,
-            "answers": {},
-            "multi_select_temp": [],
+            "current_question_id": None,   # Changed: now stores actual question ID (int or str)
+            "prev_question_id": None,      # New: track previous question for section transitions
+            "answers": {},                 # variable_name → value
+            "multi_select_temp": [],       # Temporary multi-select selections
+            "waiting_for_other_text": False,  # New: waiting for "_other" free text
+            "other_text_variable": None,      # New: which variable to store other text in
             "started_at": datetime.now().isoformat(),
         }
     return user_sessions[uid]
 
 
 def reset_session(uid: int):
+    """Clear a user's session."""
     user_sessions.pop(uid, None)
 
 
-# ─── Main Menu Keyboard ───
+# ============================================================
+# KEYBOARD BUILDERS
+# ============================================================
+
 def get_main_menu_keyboard() -> ReplyKeyboardMarkup:
     """Build the persistent main menu keyboard."""
     keyboard = [
@@ -144,12 +182,22 @@ def get_main_menu_keyboard() -> ReplyKeyboardMarkup:
     return ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
 
 
-# ─── Build ReplyKeyboard from question options ───
-def build_reply_keyboard(question: dict) -> ReplyKeyboardMarkup:
-    """Build a ReplyKeyboardMarkup from question options."""
+def build_reply_keyboard(question: dict, user_answers: dict) -> ReplyKeyboardMarkup:
+    """
+    Build a ReplyKeyboardMarkup from question options.
+    Handles conditional_options based on user_answers.
+    """
+    options = get_options_for_question(question, user_answers)
+    if not options:
+        # Fallback: just cancel button
+        return ReplyKeyboardMarkup(
+            [[KeyboardButton("❌ انصراف و بازگشت")]],
+            resize_keyboard=True,
+        )
+
     rows = []
     row = []
-    for opt in question["options"]:
+    for opt in options:
         row.append(KeyboardButton(opt["text"]))
         if len(row) == 2:
             rows.append(row)
@@ -160,11 +208,20 @@ def build_reply_keyboard(question: dict) -> ReplyKeyboardMarkup:
     return ReplyKeyboardMarkup(rows, resize_keyboard=True, one_time_keyboard=True)
 
 
-def build_multi_reply_keyboard(question: dict, selected: list) -> ReplyKeyboardMarkup:
+def build_multi_reply_keyboard(
+    question: dict, selected: list, user_answers: dict
+) -> ReplyKeyboardMarkup:
     """Build keyboard for multi-select with checkmarks and confirm button."""
+    options = get_options_for_question(question, user_answers)
+    if not options:
+        return ReplyKeyboardMarkup(
+            [[KeyboardButton("❌ انصراف و بازگشت")]],
+            resize_keyboard=True,
+        )
+
     rows = []
     row = []
-    for opt in question["options"]:
+    for opt in options:
         check = " ✅" if opt["value"] in selected else ""
         row.append(KeyboardButton(opt["text"] + check))
         if len(row) == 2:
@@ -172,85 +229,176 @@ def build_multi_reply_keyboard(question: dict, selected: list) -> ReplyKeyboardM
             row = []
     if row:
         rows.append(row)
+
     confirm_text = question.get("confirm_button", "✅ تأیید و ادامه")
     rows.append([KeyboardButton(confirm_text)])
     rows.append([KeyboardButton("❌ انصراف و بازگشت")])
     return ReplyKeyboardMarkup(rows, resize_keyboard=True, one_time_keyboard=False)
 
 
-def find_option_value(question: dict, user_text: str) -> str | None:
+def find_option_value(question: dict, user_text: str, user_answers: dict) -> str | None:
     """Find the option value matching the user's text (with or without checkmark)."""
     clean_text = user_text.replace(" ✅", "").strip()
-    for opt in question["options"]:
+    options = get_options_for_question(question, user_answers)
+    if not options:
+        return None
+    for opt in options:
         if opt["text"] == clean_text or opt["text"] == user_text:
             return opt["value"]
     return None
 
 
-# ─── Send question to user ───
+# ============================================================
+# PROGRESS DISPLAY
+# ============================================================
+
+def get_progress_text(current_id, user_answers: dict) -> str:
+    """Generate a progress indicator string."""
+    progress = calculate_progress(current_id, user_answers)
+    section = get_section_for_question(current_id)
+
+    # Count active questions for display
+    active_count = 0
+    current_pos = 0
+    for qid in QUESTION_FLOW:
+        q = get_question_by_id(qid)
+        if q and should_show_question(q, user_answers):
+            active_count += 1
+            if qid == current_id:
+                current_pos = active_count
+
+    return f"📊 سؤال {current_pos} از ~{active_count} ({progress}%)"
+
+
+# ============================================================
+# SEND QUESTION TO USER
+# ============================================================
+
 async def send_question(uid: int, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Send the current question to the user, handling all types."""
     session = get_session(uid)
-    qid = session["current_question"]
-    question = get_question_by_id(qid)
-    if not question:
+    qid = session["current_question_id"]
+
+    if qid is None:
         return ConversationHandler.END
 
-    prev_q = get_question_by_id(qid - 1)
-    if prev_q is None or prev_q["section"] != question["section"]:
-        transition = TRANSITIONS.get(f"section_{question['section']}", "")
-        if transition:
-            await context.bot.send_message(
-                chat_id=uid, text=transition, parse_mode="HTML"
-            )
+    question = get_question_by_id(qid)
+    if not question:
+        logger.error(f"Question ID {qid} not found!")
+        return ConversationHandler.END
 
-    total = get_total_questions()
-    text = f"<b>سؤال {qid} از {total}</b>\n\n{question['text']}"
+    answers = session["answers"]
+
+    # ── Check if we need a section transition message ──
+    transition_msg = should_show_section_transition(
+        qid, session.get("prev_question_id"), answers
+    )
+    if transition_msg:
+        await context.bot.send_message(
+            chat_id=uid, text=transition_msg, parse_mode="HTML"
+        )
+
+    # ── Build question text ──
+    progress = get_progress_text(qid, answers)
+    pet_name = answers.get("pet_name", "پتت")
+
+    # Replace {pet_name} placeholder in question text if present
+    q_text = question["text"].replace("{pet_name}", pet_name)
+
+    text = f"{progress}\n\n{q_text}"
     if question.get("micro_copy"):
         text += f"\n\n{question['micro_copy']}"
 
-    if question["type"] == "text_input":
-        cancel_kb = ReplyKeyboardMarkup(
+    q_type = question["type"]
+
+    # ── TEXT INPUT ──
+    if q_type == "text_input":
+        # Some text_input questions also have button options (like Q33)
+        if question.get("options"):
+            kb = build_reply_keyboard(question, answers)
+            placeholder = question.get("placeholder", "پاسخ خود را بنویسید...")
+        else:
+            kb = ReplyKeyboardMarkup(
+                [[KeyboardButton("❌ انصراف و بازگشت")]],
+                resize_keyboard=True,
+            )
+            placeholder = question.get("placeholder", "")
+
+        if placeholder:
+            text += f"\n\n💡 {placeholder}"
+
+        await context.bot.send_message(
+            chat_id=uid, text=text, parse_mode="HTML", reply_markup=kb,
+        )
+        return ANSWERING
+
+    # ── NUMBER INPUT ──
+    elif q_type == "number_input":
+        kb = ReplyKeyboardMarkup(
             [[KeyboardButton("❌ انصراف و بازگشت")]],
             resize_keyboard=True,
         )
+        placeholder = question.get("placeholder", "")
+        if placeholder:
+            text += f"\n\n💡 {placeholder}"
+
+        num_range = question.get("number_range")
+        if num_range:
+            text += f"\n(محدوده مجاز: {num_range['min']} تا {num_range['max']})"
+
         await context.bot.send_message(
-            chat_id=uid,
-            text=text,
-            parse_mode="HTML",
-            reply_markup=cancel_kb,
+            chat_id=uid, text=text, parse_mode="HTML", reply_markup=kb,
         )
         return ANSWERING
 
-    elif question["type"] == "multi_select":
+    # ── MULTI SELECT ──
+    elif q_type == "multi_select":
         session["multi_select_temp"] = []
-        kb = build_multi_reply_keyboard(question, [])
+        kb = build_multi_reply_keyboard(question, [], answers)
         await context.bot.send_message(
-            chat_id=uid, text=text, reply_markup=kb, parse_mode="HTML"
+            chat_id=uid, text=text, parse_mode="HTML", reply_markup=kb,
         )
         return MULTI_SELECT
 
+    # ── INLINE BUTTON (single select) ──
     else:
-        kb = build_reply_keyboard(question)
+        kb = build_reply_keyboard(question, answers)
         await context.bot.send_message(
-            chat_id=uid, text=text, reply_markup=kb, parse_mode="HTML"
+            chat_id=uid, text=text, parse_mode="HTML", reply_markup=kb,
         )
         return ANSWERING
 
 
+# ============================================================
+# ADVANCE TO NEXT QUESTION
+# ============================================================
+
 async def advance(uid: int, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Move to the next applicable question or finish the assessment."""
     session = get_session(uid)
-    next_id = session["current_question"] + 1
-    if next_id > get_total_questions():
+    current_id = session["current_question_id"]
+    answers = session["answers"]
+
+    next_id = get_next_question_id(current_id, answers)
+
+    if next_id is None:
+        # Assessment complete
         await finish_assessment(uid, context)
         return MAIN_MENU
     else:
-        session["current_question"] = next_id
+        session["prev_question_id"] = current_id
+        session["current_question_id"] = next_id
         return await send_question(uid, context)
 
 
-# ─── Finish Assessment ───
+# ============================================================
+# FINISH ASSESSMENT
+# ============================================================
+
 async def finish_assessment(uid: int, context: ContextTypes.DEFAULT_TYPE):
+    """Complete the assessment, send data to admin, notify user."""
     session = get_session(uid)
+
     try:
         chat = await context.bot.get_chat(uid)
         full_name = chat.full_name or "ناشناس"
@@ -269,6 +417,7 @@ async def finish_assessment(uid: int, context: ContextTypes.DEFAULT_TYPE):
         f"🆔 یوزرنیم: {username}\n"
         f"🔢 Chat ID: {uid}\n"
         f"⏰ زمان: {now}\n"
+        f"📊 تعداد سؤالات پاسخ داده: {len(session['answers'])}\n"
         f"{'─' * 30}\n"
         f"💡 برای ارسال PDF، روی این پیام Reply کن و فایل رو بفرست.\n"
         f"{'─' * 30}\n"
@@ -278,7 +427,12 @@ async def finish_assessment(uid: int, context: ContextTypes.DEFAULT_TYPE):
     chunks = [full_msg[i: i + 4000] for i in range(0, len(full_msg), 4000)]
     for i, chunk in enumerate(chunks):
         prefix = f"📄 بخش {i + 1}/{len(chunks)}:\n\n" if len(chunks) > 1 else ""
-        await context.bot.send_message(chat_id=ADMIN_CHAT_ID, text=prefix + chunk)
+        try:
+            await context.bot.send_message(
+                chat_id=ADMIN_CHAT_ID, text=prefix + chunk
+            )
+        except Exception as e:
+            logger.error(f"Failed to send to admin: {e}")
 
     await context.bot.send_message(
         chat_id=uid,
@@ -286,12 +440,17 @@ async def finish_assessment(uid: int, context: ContextTypes.DEFAULT_TYPE):
         parse_mode="HTML",
         reply_markup=get_main_menu_keyboard(),
     )
+
     reset_session(uid)
     logger.info(f"Assessment completed for user {uid} ({full_name})")
 
 
-# ─── /start Command ───
+# ============================================================
+# COMMAND HANDLERS
+# ============================================================
+
 async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Handle /start command — show main menu."""
     uid = update.effective_user.id
     reset_session(uid)
 
@@ -313,25 +472,25 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     )
 
     await update.message.reply_text(
-        welcome,
-        parse_mode="HTML",
-        reply_markup=get_main_menu_keyboard(),
+        welcome, parse_mode="HTML", reply_markup=get_main_menu_keyboard(),
     )
     return MAIN_MENU
 
 
-# ─── /health Command (shortcut) ───
 async def cmd_health(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Shortcut: directly start health assessment via /health command."""
     uid = update.effective_user.id
     reset_session(uid)
     session = get_session(uid)
-    session["current_question"] = 1
+
+    first_id = get_first_question_id()
+    session["current_question_id"] = first_id
+    session["prev_question_id"] = None
 
     await update.message.reply_text(
         "🩺 <b>شروع ارزیابی سلامت پت</b>\n\n"
         "📝 الان چند تا سؤال ازت می‌پرسم.\n"
-        "⏱ حدود ۲ تا ۳ دقیقه وقتت رو می‌گیره.\n\n"
+        "⏱ حدود ۵ تا ۱۰ دقیقه وقتت رو می‌گیره.\n\n"
         "❌ هر لحظه می‌تونی «انصراف و بازگشت» رو بزنی.\n\n"
         "بزن بریم! 👇",
         parse_mode="HTML",
@@ -339,9 +498,8 @@ async def cmd_health(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     return await send_question(uid, context)
 
 
-# ─── /diet Command (shortcut) ───
 async def cmd_diet(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Shortcut: show diet info via /diet command."""
+    """Shortcut: show diet info."""
     await update.message.reply_text(
         MENU_RESPONSES[BTN_DIET],
         parse_mode="HTML",
@@ -350,9 +508,8 @@ async def cmd_diet(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     return MAIN_MENU
 
 
-# ─── /support Command (shortcut) ───
 async def cmd_support(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Shortcut: show support info via /support command."""
+    """Shortcut: show support info."""
     await update.message.reply_text(
         MENU_RESPONSES[BTN_SUPPORT],
         parse_mode="HTML",
@@ -361,41 +518,50 @@ async def cmd_support(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int
     return MAIN_MENU
 
 
-# ─── /stats Command (admin only) ───
 async def cmd_stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Admin-only stats command."""
     if update.effective_user.id != ADMIN_CHAT_ID:
         await update.message.reply_text("⛔ فقط ادمین دسترسی داره.")
         return
     active = len(user_sessions)
     await update.message.reply_text(
-        f"📊 <b>آمار بات</b>\n{'─' * 25}\n👥 Session‌های فعال: {active}",
+        f"📊 <b>آمار بات</b>\n{'─' * 25}\n"
+        f"👥 Session‌های فعال: {active}\n"
+        f"📋 سؤالات کل: {get_total_all_questions()}\n"
+        f"📋 سؤالات پایه: {get_total_base_questions()}",
         parse_mode="HTML",
     )
 
 
-# ─── Handle Main Menu Selection ───
+# ============================================================
+# MAIN MENU HANDLER
+# ============================================================
+
 async def handle_main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Handle button presses in the main menu."""
     uid = update.effective_user.id
     user_text = update.message.text.strip()
 
-    # Health Report → Start questions
+    # Health Report → Start assessment
     if user_text == BTN_HEALTH_REPORT:
         reset_session(uid)
         session = get_session(uid)
-        session["current_question"] = 1
+
+        first_id = get_first_question_id()
+        session["current_question_id"] = first_id
+        session["prev_question_id"] = None
 
         await update.message.reply_text(
             "🩺 <b>شروع ارزیابی سلامت پت</b>\n\n"
             "📝 الان چند تا سؤال ازت می‌پرسم.\n"
-            "⏱ حدود ۲ تا ۳ دقیقه وقتت رو می‌گیره.\n\n"
+            "⏱ حدود ۵ تا ۱۰ دقیقه وقتت رو می‌گیره.\n\n"
             "❌ هر لحظه می‌تونی «انصراف و بازگشت» رو بزنی.\n\n"
             "بزن بریم! 👇",
             parse_mode="HTML",
         )
-
         return await send_question(uid, context)
 
-    # Other menu items → Show info + stay in menu
+    # Other menu items → Show info
     if user_text in MENU_RESPONSES:
         await update.message.reply_text(
             MENU_RESPONSES[user_text],
@@ -412,8 +578,12 @@ async def handle_main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     return MAIN_MENU
 
 
-# ─── Handle Cancel (return to menu) ───
+# ============================================================
+# CANCEL HANDLER
+# ============================================================
+
 async def handle_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Cancel the assessment and return to main menu."""
     uid = update.effective_user.id
     reset_session(uid)
 
@@ -424,92 +594,183 @@ async def handle_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> i
     return MAIN_MENU
 
 
-# ─── Handle Regular Answer (inline_button + text_input) ───
+# ============================================================
+# ANSWER HANDLER (inline_button + text_input + number_input)
+# ============================================================
+
 async def handle_answer(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Handle single-choice and text/number input answers."""
     uid = update.effective_user.id
     user_text = update.message.text.strip()
 
+    # Cancel check
     if user_text == "❌ انصراف و بازگشت":
         return await handle_cancel(update, context)
 
     session = get_session(uid)
-    qid = session.get("current_question", 0)
-    if qid == 0:
+    qid = session.get("current_question_id")
+    if qid is None:
         return MAIN_MENU
 
     question = get_question_by_id(qid)
     if not question:
+        logger.error(f"Question {qid} not found in handle_answer")
         return MAIN_MENU
 
-    if question["type"] == "text_input":
-        if question["variable"] in ("age_months", "weight_kg"):
-            cleaned = user_text.replace(",", ".").replace("٫", ".")
-            try:
-                float(cleaned)
-                user_text = cleaned
-            except ValueError:
+    answers = session["answers"]
+    q_type = question["type"]
+    variable = question["variable"]
+
+    # ── Waiting for "other" free text ──
+    if session.get("waiting_for_other_text"):
+        other_var = session.get("other_text_variable", variable + "_other")
+        answers[other_var] = user_text
+        session["waiting_for_other_text"] = False
+        session["other_text_variable"] = None
+        await update.message.reply_text(f"✅ ثبت شد: {user_text}")
+        return await advance(uid, context)
+
+    # ── TEXT INPUT ──
+    if q_type == "text_input":
+        # Check if there are button options too (e.g., Q33 "no concern" button)
+        if question.get("options"):
+            value = find_option_value(question, user_text, answers)
+            if value:
+                answers[variable] = value
+                return await advance(uid, context)
+
+        # Otherwise treat as free text
+        answers[variable] = user_text
+        return await advance(uid, context)
+
+    # ── NUMBER INPUT ──
+    elif q_type == "number_input":
+        cleaned = user_text.replace(",", ".").replace("٫", ".").replace("،", ".")
+        # Remove Persian/Arabic numerals → convert to Western
+        persian_digits = "۰۱۲۳۴۵۶۷۸۹"
+        arabic_digits = "٠١٢٣٤٥٦٧٨٩"
+        for i, (p, a) in enumerate(zip(persian_digits, arabic_digits)):
+            cleaned = cleaned.replace(p, str(i)).replace(a, str(i))
+
+        try:
+            num_val = float(cleaned)
+        except ValueError:
+            await update.message.reply_text(
+                "❌ لطفاً یک عدد معتبر وارد کن.\nمثلاً: 4.5 یا ۸"
+            )
+            return ANSWERING
+
+        # Validate range
+        num_range = question.get("number_range")
+        if num_range:
+            if num_val < num_range["min"] or num_val > num_range["max"]:
                 await update.message.reply_text(
-                    "❌ لطفاً یک عدد معتبر وارد کن.\nمثلاً: 8.5 یا 24"
+                    f"❌ عدد باید بین {num_range['min']} و {num_range['max']} باشه.\n"
+                    f"لطفاً دوباره وارد کن:"
                 )
                 return ANSWERING
 
-        session["answers"][question["variable"]] = user_text
+        answers[variable] = num_val
         return await advance(uid, context)
 
-    elif question["type"] == "inline_button":
-        value = find_option_value(question, user_text)
+    # ── INLINE BUTTON (single select) ──
+    elif q_type == "inline_button":
+        value = find_option_value(question, user_text, answers)
+
         if value is None:
             await update.message.reply_text(
                 "⚠️ لطفاً یکی از گزینه‌های موجود رو انتخاب کن!"
             )
             return ANSWERING
 
-        session["answers"][question["variable"]] = value
+        # Check if this is "_other" option (needs follow-up text)
+        if value == "_other" and question.get("has_other_text"):
+            answers[variable] = "_other"
+            session["waiting_for_other_text"] = True
+            session["other_text_variable"] = variable + "_detail"
+
+            await update.message.reply_text(
+                "✏️ لطفاً بنویس:",
+                reply_markup=ReplyKeyboardMarkup(
+                    [[KeyboardButton("❌ انصراف و بازگشت")]],
+                    resize_keyboard=True,
+                ),
+            )
+            return ANSWERING
+
+        answers[variable] = value
         return await advance(uid, context)
 
     return ANSWERING
 
 
-# ─── Handle Multi-Select Answer ───
+# ============================================================
+# MULTI-SELECT HANDLER
+# ============================================================
+
 async def handle_multi_select(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Handle multi-select question interactions."""
     uid = update.effective_user.id
     user_text = update.message.text.strip()
 
+    # Cancel check
     if user_text == "❌ انصراف و بازگشت":
         return await handle_cancel(update, context)
 
     session = get_session(uid)
-    qid = session.get("current_question", 0)
+    qid = session.get("current_question_id")
     question = get_question_by_id(qid)
 
     if not question:
         return MAIN_MENU
 
+    answers = session["answers"]
+    options = get_options_for_question(question, answers)
     confirm_text = question.get("confirm_button", "✅ تأیید و ادامه")
 
+    # ── Confirm button pressed ──
     if user_text == confirm_text:
         final = session["multi_select_temp"] if session["multi_select_temp"] else ["none"]
-        session["answers"][question["variable"]] = final
+        answers[question["variable"]] = final
         session["multi_select_temp"] = []
 
         if final != ["none"]:
             selected_texts = []
             for v in final:
-                for opt in question["options"]:
-                    if opt["value"] == v:
-                        selected_texts.append(opt["text"])
+                if options:
+                    for opt in options:
+                        if opt["value"] == v:
+                            selected_texts.append(opt["text"])
+            if selected_texts:
+                await update.message.reply_text(
+                    "✅ انتخاب‌های شما:\n" + "\n".join(f"  • {t}" for t in selected_texts)
+                )
+
+        # Check if "_other" was selected and needs text
+        if "_other" in final and question.get("has_other_text"):
+            session["multi_select_temp"] = []  # Clear
+            session["waiting_for_other_text"] = True
+            session["other_text_variable"] = question["variable"] + "_detail"
+
             await update.message.reply_text(
-                f"✅ انتخاب‌های شما:\n" + "\n".join(f"  • {t}" for t in selected_texts)
+                "✏️ لطفاً جزئیات رو بنویس:",
+                reply_markup=ReplyKeyboardMarkup(
+                    [[KeyboardButton("❌ انصراف و بازگشت")]],
+                    resize_keyboard=True,
+                ),
             )
+            return ANSWERING
 
         return await advance(uid, context)
 
+    # ── Toggle option ──
     clean_text = user_text.replace(" ✅", "").strip()
     value = None
-    for opt in question["options"]:
-        if opt["text"] == clean_text:
-            value = opt["value"]
-            break
+    if options:
+        for opt in options:
+            if opt["text"] == clean_text:
+                value = opt["value"]
+                break
 
     if value is None:
         await update.message.reply_text(
@@ -518,11 +779,18 @@ async def handle_multi_select(update: Update, context: ContextTypes.DEFAULT_TYPE
         return MULTI_SELECT
 
     temp = session["multi_select_temp"]
-    if value == "none":
-        session["multi_select_temp"] = ["none"]
+
+    # "none" / "all_normal" / "nothing" → clear others
+    exclusive_values = {"none", "all_normal", "nothing", "healthy", "dont_remember"}
+    if value in exclusive_values:
+        session["multi_select_temp"] = [value]
+        await update.message.reply_text(f"✅ انتخاب شد: {clean_text}")
     else:
-        if "none" in temp:
-            temp.remove("none")
+        # Remove exclusive values if present
+        for ev in exclusive_values:
+            if ev in temp:
+                temp.remove(ev)
+
         if value in temp:
             temp.remove(value)
             await update.message.reply_text(f"❌ حذف شد: {clean_text}")
@@ -530,25 +798,30 @@ async def handle_multi_select(update: Update, context: ContextTypes.DEFAULT_TYPE
             temp.append(value)
             await update.message.reply_text(f"✅ اضافه شد: {clean_text}")
 
-    total = get_total_questions()
-    text = f"<b>سؤال {qid} از {total}</b>\n\n{question['text']}"
+    # Re-send question with updated keyboard
+    progress = get_progress_text(qid, answers)
+    q_text = question["text"]
+    text = f"{progress}\n\n{q_text}"
     if question.get("micro_copy"):
         text += f"\n\n{question['micro_copy']}"
 
-    kb = build_multi_reply_keyboard(question, session["multi_select_temp"])
-    await update.message.reply_text(
-        text=text, reply_markup=kb, parse_mode="HTML"
-    )
+    kb = build_multi_reply_keyboard(question, session["multi_select_temp"], answers)
+    await update.message.reply_text(text=text, reply_markup=kb, parse_mode="HTML")
     return MULTI_SELECT
 
 
-# ─── Admin Reply Handler ───
+# ============================================================
+# ADMIN REPLY HANDLER
+# ============================================================
+
 async def admin_reply_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle admin replies to forward files/messages to users."""
     msg = update.message
     if msg.chat_id != ADMIN_CHAT_ID:
         return
     if not msg.reply_to_message:
         return
+
     original = msg.reply_to_message.text or ""
     chat_id = None
     for line in original.split("\n"):
@@ -557,10 +830,13 @@ async def admin_reply_handler(update: Update, context: ContextTypes.DEFAULT_TYPE
                 chat_id = int(line.split(":")[-1].strip())
             except ValueError:
                 pass
+
     if not chat_id:
         await msg.reply_text("⚠️ Chat ID پیدا نشد!")
         return
+
     caption = "📄 گزارش سلامت اختصاصی پت شما آماده شد! 🎉\n\nاگه سؤالی داشتی /start بزن."
+
     try:
         if msg.document:
             await context.bot.send_document(
@@ -582,7 +858,10 @@ async def admin_reply_handler(update: Update, context: ContextTypes.DEFAULT_TYPE
         await msg.reply_text(f"❌ خطا: {e}")
 
 
-# ─── Auto-set Bot Menu Commands (☰ button) ───
+# ============================================================
+# BOT MENU COMMANDS (☰ button)
+# ============================================================
+
 async def post_init(application):
     """Set bot commands so the ☰ menu button appears in Telegram."""
     commands = [
@@ -594,7 +873,10 @@ async def post_init(application):
     logger.info("✅ Bot menu commands set successfully!")
 
 
-# ─── Main ───
+# ============================================================
+# MAIN ENTRY POINT
+# ============================================================
+
 def main():
     if not BOT_TOKEN:
         print("❌ BOT_TOKEN not set!")
@@ -604,6 +886,7 @@ def main():
         return
 
     print("🚀 Starting Petinex Bot...")
+    print(f"📋 Total questions: {get_total_all_questions()} ({get_total_base_questions()} base + {get_total_all_questions() - get_total_base_questions()} conditional)")
 
     try:
         app = Application.builder().token(BOT_TOKEN).post_init(post_init).build()
