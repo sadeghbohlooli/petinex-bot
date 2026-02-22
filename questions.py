@@ -1105,3 +1105,9 @@ def calculate_progress(current_id, user_answers):
         idx = active_questions.index(current_id)
         return int((idx / len(active_questions)) * 100)
     return 0
+# ============================================================
+# BACKWARD COMPATIBILITY ALIAS
+# ============================================================
+def get_total_questions():
+    """Alias for backward compatibility — returns base question count."""
+    return get_total_base_questions()
