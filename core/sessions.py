@@ -1,13 +1,7 @@
-"""
-core/sessions.py
-────────────────
-مدیریت session (حافظه موقت) هر کاربر.
-کپی دقیق از بخش SESSION MANAGEMENT فایل main.py اصلی.
-"""
+"""مدیریت session کاربران — مستقل از هر flow."""
 
 from datetime import datetime
 
-# ─── ذخیره session همه کاربران ───
 user_sessions = {}
 
 
@@ -15,6 +9,7 @@ def get_session(uid: int) -> dict:
     """Get or create a user session."""
     if uid not in user_sessions:
         user_sessions[uid] = {
+            "active_flow": None,              # "health", "diet", "vet", ...
             "current_question_id": None,
             "prev_question_id": None,
             "answers": {},
