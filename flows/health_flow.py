@@ -20,7 +20,7 @@ from questions.health_questions import (
     get_next_question_id,
     get_first_question_id,
     should_show_section_transition,
-    QUESTION_FLOW,  # ایمپورت QUESTION_FLOW برای محاسبه پیشرفت
+    QUESTION_FLOW,  # این مهمه
 )
 from prompts.health_prompt import generate_health_prompt
 from config import ADMIN_CHAT_ID
@@ -39,10 +39,12 @@ def get_progress_text(current_id: int, answers: dict) -> str:
     if current_id in active_questions:
         current_index = active_questions.index(current_id)  # ایندکس از 0 شروع میشه
         total = len(active_questions)
-        percent = int(( (current_index + 1) / total ) * 100)
+        # محاسبه درصد با توجه به شماره سؤال (current_index + 1)
+        percent = int(((current_index + 1) / total) * 100)
         return f"📊 سؤال {current_index + 1} از ~{total} ({percent}%)"
     else:
-        return ""
+        # اگر سؤال فعلی در لیست نبود (اشکال)، یه پیام پیش‌فرض برگردون
+        return "📊 در حال محاسبه پیشرفت..."
 
 async def start_health_flow(uid: int, context: ContextTypes.DEFAULT_TYPE) -> int:
     session = get_session(uid)
