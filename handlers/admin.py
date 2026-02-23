@@ -1,7 +1,4 @@
-"""
-handlers/admin.py
-Admin reply handler – forwards files / photos / messages to users.
-"""
+"""Admin reply handler — forward files/messages to users."""
 
 import logging
 
