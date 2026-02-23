@@ -1,9 +1,4 @@
-"""
-core/progress.py
-────────────────
-تابع نمایش پیشرفت (progress bar متنی).
-کپی دقیق از main.py اصلی — بدون هیچ تغییری.
-"""
+"""نمایش پیشرفت ارزیابی."""
 
 from questions import (
     QUESTION_FLOW,
@@ -14,16 +9,11 @@ from questions import (
 )
 
 
-# ============================================================
-# PROGRESS DISPLAY
-# ============================================================
-
 def get_progress_text(current_id, user_answers: dict) -> str:
     """Generate a progress indicator string."""
     progress = calculate_progress(current_id, user_answers)
     section = get_section_for_question(current_id)
 
-    # Count active questions for display
     active_count = 0
     current_pos = 0
     for qid in QUESTION_FLOW:
