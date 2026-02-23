@@ -19,13 +19,30 @@ from questions.health_questions import (
     should_show_question,
     get_next_question_id,
     get_first_question_id,
-    calculate_progress,
     should_show_section_transition,
+    QUESTION_FLOW,  # ایمپورت QUESTION_FLOW برای محاسبه پیشرفت
 )
 from prompts.health_prompt import generate_health_prompt
 from config import ADMIN_CHAT_ID
 
 logger = logging.getLogger(__name__)
+
+# تابع جدید برای نمایش متن پیشرفت
+def get_progress_text(current_id: int, answers: dict) -> str:
+    """محاسبه شماره سؤال فعلی و تعداد کل سوالات و درصد پیشرفت"""
+    active_questions = []
+    for qid in QUESTION_FLOW:
+        q = get_question_by_id(qid)
+        if q and should_show_question(q, answers):
+            active_questions.append(qid)
+    
+    if current_id in active_questions:
+        current_index = active_questions.index(current_id)  # ایندکس از 0 شروع میشه
+        total = len(active_questions)
+        percent = int(( (current_index + 1) / total ) * 100)
+        return f"📊 سؤال {current_index + 1} از ~{total} ({percent}%)"
+    else:
+        return ""
 
 async def start_health_flow(uid: int, context: ContextTypes.DEFAULT_TYPE) -> int:
     session = get_session(uid)
@@ -53,16 +70,18 @@ async def send_question(uid: int, context: ContextTypes.DEFAULT_TYPE) -> int:
 
     answers = session["answers"]
 
+    # نمایش پیام تغییر بخش در صورت نیاز
     transition_msg = should_show_section_transition(
         qid, session.get("prev_question_id"), answers
     )
     if transition_msg:
         await context.bot.send_message(chat_id=uid, text=transition_msg, parse_mode="HTML")
 
-    progress = calculate_progress(qid, answers)
+    # استفاده از تابع جدید برای پیشرفت
+    progress_text = get_progress_text(qid, answers)
     pet_name = answers.get("pet_name", "پتت")
     q_text = question["text"].replace("{pet_name}", pet_name)
-    text = f"{progress}\n\n{q_text}"
+    text = f"{progress_text}\n\n{q_text}"
     if question.get("micro_copy"):
         text += f"\n\n{question['micro_copy']}"
 
@@ -70,7 +89,7 @@ async def send_question(uid: int, context: ContextTypes.DEFAULT_TYPE) -> int:
     options = get_options_for_question(question, answers)
 
     if q_type == "text_input":
-        if options:
+        if options:  # مثلاً سوال 33 که هم دکمه داره هم ورودی متن
             kb = build_option_keyboard(options)
         else:
             kb = cancel_only_keyboard()
@@ -120,6 +139,7 @@ async def handle_health_answer(update: Update, context: ContextTypes.DEFAULT_TYP
     q_type = question["type"]
     variable = question["variable"]
 
+    # بررسی حالت waiting_for_other_text
     if session.get("waiting_for_other_text"):
         other_var = session.get("other_text_variable", variable + "_other")
         answers[other_var] = user_text
@@ -128,19 +148,24 @@ async def handle_health_answer(update: Update, context: ContextTypes.DEFAULT_TYP
         await update.message.reply_text(f"✅ ثبت شد: {user_text}")
         return await advance(uid, context)
 
+    # Text input با گزینه (مثل Q33)
     if q_type == "text_input" and question.get("options"):
         value = find_option_value(question["options"], user_text)
         if value:
             answers[variable] = value
             return await advance(uid, context)
+        # اگر دکمه نبود، به عنوان متن آزاد در نظر بگیر
         answers[variable] = user_text
         return await advance(uid, context)
 
+    # Text input ساده
     if q_type == "text_input":
         answers[variable] = user_text
         return await advance(uid, context)
 
+    # Number input
     if q_type == "number_input":
+        # پاکسازی اعداد فارسی
         cleaned = user_text.replace(",", ".").replace("٫", ".").replace("،", ".")
         persian_digits = "۰۱۲۳۴۵۶۷۸۹"
         arabic_digits = "٠١٢٣٤٥٦٧٨٩"
@@ -160,6 +185,7 @@ async def handle_health_answer(update: Update, context: ContextTypes.DEFAULT_TYP
         answers[variable] = num_val
         return await advance(uid, context)
 
+    # Inline button
     if q_type == "inline_button":
         options = get_options_for_question(question, answers)
         value = find_option_value(options, user_text)
@@ -214,6 +240,7 @@ async def handle_health_multi_select(update: Update, context: ContextTypes.DEFAU
 
         return await advance(uid, context)
 
+    # Toggle option
     value = find_option_value(options, user_text)
     if value is None:
         await update.message.reply_text("⚠️ لطفاً یکی از گزینه‌ها رو انتخاب کن.")
@@ -224,6 +251,7 @@ async def handle_health_multi_select(update: Update, context: ContextTypes.DEFAU
     if value in exclusive:
         session["multi_select_temp"] = [value]
     else:
+        # حذف مقادیر انحصاری
         for ev in exclusive:
             if ev in temp:
                 temp.remove(ev)
@@ -232,10 +260,11 @@ async def handle_health_multi_select(update: Update, context: ContextTypes.DEFAU
         else:
             temp.append(value)
 
-    progress = calculate_progress(qid, answers)
+    # بازفرستادن سؤال با کیبورد به‌روز
+    progress_text = get_progress_text(qid, answers)
     pet_name = answers.get("pet_name", "پتت")
     q_text = question["text"].replace("{pet_name}", pet_name)
-    text = f"{progress}\n\n{q_text}"
+    text = f"{progress_text}\n\n{q_text}"
     if question.get("micro_copy"):
         text += f"\n\n{question['micro_copy']}"
     kb = build_multi_select_keyboard(options, session["multi_select_temp"], confirm_text)
