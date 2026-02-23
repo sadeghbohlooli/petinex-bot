@@ -1,48 +1,7 @@
-"""
-core/keyboards.py
-─────────────────
-توابع ساخت کیبورد (منوی اصلی + سؤالات تکی + چندانتخابی).
-کپی دقیق از main.py اصلی — بدون هیچ تغییری.
-"""
+"""ساخت تمام کیبوردهای reply — مستقل از flow خاص."""
 
-from telegram import (
-    ReplyKeyboardMarkup,
-    KeyboardButton,
-)
-
+from telegram import ReplyKeyboardMarkup, KeyboardButton
 from questions import get_options_for_question
-
-from core.menu import (
-    BTN_HEALTH_REPORT,
-    BTN_DIET,
-    BTN_VET_ONLINE,
-    BTN_CLINIC,
-    BTN_PET_SHOP,
-    BTN_BOARDING,
-    BTN_PHARMACY,
-    BTN_GROOMER,
-    BTN_TRAINER,
-    BTN_EDUCATION,
-    BTN_SUPPORT,
-)
-
-
-# ============================================================
-# KEYBOARD BUILDERS
-# ============================================================
-
-def get_main_menu_keyboard() -> ReplyKeyboardMarkup:
-    """Build the persistent main menu keyboard."""
-    keyboard = [
-        [KeyboardButton(BTN_HEALTH_REPORT)],
-        [KeyboardButton(BTN_DIET), KeyboardButton(BTN_VET_ONLINE)],
-        [KeyboardButton(BTN_CLINIC), KeyboardButton(BTN_PET_SHOP)],
-        [KeyboardButton(BTN_BOARDING), KeyboardButton(BTN_PHARMACY)],
-        [KeyboardButton(BTN_GROOMER), KeyboardButton(BTN_TRAINER)],
-        [KeyboardButton(BTN_EDUCATION)],
-        [KeyboardButton(BTN_SUPPORT)],
-    ]
-    return ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
 
 
 def build_reply_keyboard(question: dict, user_answers: dict) -> ReplyKeyboardMarkup:
@@ -52,7 +11,6 @@ def build_reply_keyboard(question: dict, user_answers: dict) -> ReplyKeyboardMar
     """
     options = get_options_for_question(question, user_answers)
     if not options:
-        # Fallback: just cancel button
         return ReplyKeyboardMarkup(
             [[KeyboardButton("❌ انصراف و بازگشت")]],
             resize_keyboard=True,
