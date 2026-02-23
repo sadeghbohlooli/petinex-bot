@@ -1,7 +1,6 @@
 """
-flows/assessment.py
-Core assessment flow: send_question, advance, finish_assessment.
-Extracted verbatim from main.py — zero logic changes.
+فلوی گزارش سلامت — تمام منطق مربوط به ارزیابی سلامت.
+شامل: شروع فلو، ارسال سؤال، دریافت جواب، اتمام ارزیابی
 """
 
 import logging
@@ -11,25 +10,48 @@ from telegram import ReplyKeyboardMarkup, KeyboardButton
 from telegram.ext import ConversationHandler, ContextTypes
 
 from config import ADMIN_CHAT_ID
+from core.states import MAIN_MENU, ANSWERING, MULTI_SELECT
+from core.session import get_session, reset_session
+from core.keyboards import build_reply_keyboard, build_multi_reply_keyboard
+from core.progress import get_progress_text
 from questions import (
+    QUESTION_FLOW,
+    COMPLETION_MESSAGE,
     get_question_by_id,
     get_options_for_question,
-    should_show_section_transition,
+    should_show_question,
     get_next_question_id,
-    COMPLETION_MESSAGE,
+    should_show_section_transition,
+    get_first_question_id,
 )
 from prompt_template import generate_prompt
 
-from core.states import MAIN_MENU, ANSWERING, MULTI_SELECT
-from core.sessions import get_session, reset_session
-from core.keyboards import (
-    get_main_menu_keyboard,
-    build_reply_keyboard,
-    build_multi_reply_keyboard,
-)
-from core.progress import get_progress_text
-
 logger = logging.getLogger(__name__)
+
+
+# ============================================================
+# START HEALTH FLOW
+# ============================================================
+
+async def start_health_flow(uid: int, update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """شروع فلوی ارزیابی سلامت — فراخوانی از cmd_health یا handle_main_menu."""
+    reset_session(uid)
+    session = get_session(uid)
+
+    session["active_flow"] = "health"
+    first_id = get_first_question_id()
+    session["current_question_id"] = first_id
+    session["prev_question_id"] = None
+
+    await update.message.reply_text(
+        "🩺 <b>شروع ارزیابی سلامت پت</b>\n\n"
+        "📝 الان چند تا سؤال ازت می‌پرسم.\n"
+        "⏱ حدود ۵ تا ۱۰ دقیقه وقتت رو می‌گیره.\n\n"
+        "❌ هر لحظه می‌تونی «انصراف و بازگشت» رو بزنی.\n\n"
+        "بزن بریم! 👇",
+        parse_mode="HTML",
+    )
+    return await send_question(uid, context)
 
 
 # ============================================================
@@ -64,7 +86,6 @@ async def send_question(uid: int, context: ContextTypes.DEFAULT_TYPE) -> int:
     progress = get_progress_text(qid, answers)
     pet_name = answers.get("pet_name", "پتت")
 
-    # Replace {pet_name} placeholder in question text if present
     q_text = question["text"].replace("{pet_name}", pet_name)
 
     text = f"{progress}\n\n{q_text}"
@@ -75,7 +96,6 @@ async def send_question(uid: int, context: ContextTypes.DEFAULT_TYPE) -> int:
 
     # ── TEXT INPUT ──
     if q_type == "text_input":
-        # Some text_input questions also have button options (like Q33)
         if question.get("options"):
             kb = build_reply_keyboard(question, answers)
             placeholder = question.get("placeholder", "پاسخ خود را بنویسید...")
@@ -144,7 +164,6 @@ async def advance(uid: int, context: ContextTypes.DEFAULT_TYPE) -> int:
     next_id = get_next_question_id(current_id, answers)
 
     if next_id is None:
-        # Assessment complete
         await finish_assessment(uid, context)
         return MAIN_MENU
     else:
@@ -159,6 +178,8 @@ async def advance(uid: int, context: ContextTypes.DEFAULT_TYPE) -> int:
 
 async def finish_assessment(uid: int, context: ContextTypes.DEFAULT_TYPE):
     """Complete the assessment, send data to admin, notify user."""
+    from core.menu import get_main_menu_keyboard  # Lazy import
+
     session = get_session(uid)
 
     try:
