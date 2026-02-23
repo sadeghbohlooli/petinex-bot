@@ -1,9 +1,15 @@
-"""
-core/menu.py
-────────────
-ثابت‌های منوی اصلی ربات و پیام‌های پاسخ.
-کپی دقیق از main.py اصلی — بدون هیچ تغییری.
-"""
+"""منوی اصلی ربات — دکمه‌ها، پاسخ‌ها، کیبورد، هندلرهای منو."""
+
+import logging
+
+from telegram import Update, ReplyKeyboardMarkup, KeyboardButton
+from telegram.ext import ContextTypes
+
+from core.states import MAIN_MENU
+from core.session import get_session, reset_session
+from questions import get_first_question_id
+
+logger = logging.getLogger(__name__)
 
 # ─── Menu Button Labels ───
 BTN_HEALTH_REPORT = "🩺 گزارش سلامت پت"
@@ -82,3 +88,65 @@ MENU_RESPONSES = {
         "⏰ پاسخگویی: شنبه تا پنجشنبه ۹ تا ۲۱"
     ),
 }
+
+
+def get_main_menu_keyboard() -> ReplyKeyboardMarkup:
+    """Build the persistent main menu keyboard."""
+    keyboard = [
+        [KeyboardButton(BTN_HEALTH_REPORT)],
+        [KeyboardButton(BTN_DIET), KeyboardButton(BTN_VET_ONLINE)],
+        [KeyboardButton(BTN_CLINIC), KeyboardButton(BTN_PET_SHOP)],
+        [KeyboardButton(BTN_BOARDING), KeyboardButton(BTN_PHARMACY)],
+        [KeyboardButton(BTN_GROOMER), KeyboardButton(BTN_TRAINER)],
+        [KeyboardButton(BTN_EDUCATION)],
+        [KeyboardButton(BTN_SUPPORT)],
+    ]
+    return ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
+
+
+# ============================================================
+# MAIN MENU HANDLER
+# ============================================================
+
+async def handle_main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Handle button presses in the main menu."""
+    uid = update.effective_user.id
+    user_text = update.message.text.strip()
+
+    # Health Report → Start assessment
+    if user_text == BTN_HEALTH_REPORT:
+        # Lazy import to avoid circular dependency
+        from flows.health_flow import start_health_flow
+        return await start_health_flow(uid, update, context)
+
+    # Other menu items → Show info
+    if user_text in MENU_RESPONSES:
+        await update.message.reply_text(
+            MENU_RESPONSES[user_text],
+            parse_mode="HTML",
+            reply_markup=get_main_menu_keyboard(),
+        )
+        return MAIN_MENU
+
+    # Unknown text
+    await update.message.reply_text(
+        "🤔 متوجه نشدم! لطفاً از دکمه‌های منو استفاده کن 👇",
+        reply_markup=get_main_menu_keyboard(),
+    )
+    return MAIN_MENU
+
+
+# ============================================================
+# CANCEL HANDLER
+# ============================================================
+
+async def handle_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Cancel the assessment and return to main menu."""
+    uid = update.effective_user.id
+    reset_session(uid)
+
+    await update.message.reply_text(
+        "❌ ارزیابی لغو شد.\n\n🏠 برگشتی به منوی اصلی 👇",
+        reply_markup=get_main_menu_keyboard(),
+    )
+    return MAIN_MENU
