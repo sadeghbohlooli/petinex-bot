@@ -1,35 +1,17 @@
-"""
-handlers/commands.py
-────────────────────
-هندلرهای command ربات (/start, /health, /diet, /support, /stats).
-کپی دقیق از main.py اصلی — بدون هیچ تغییری در منطق.
-"""
+"""Command handlers: /start, /health, /diet, /support, /stats, post_init."""
 
-from telegram import Update
+import logging
+
+from telegram import Update, BotCommand
 from telegram.ext import ContextTypes
 
 from config import ADMIN_CHAT_ID
-from questions import (
-    get_first_question_id,
-    get_total_all_questions,
-    get_total_base_questions,
-)
+from core.states import MAIN_MENU
+from core.session import user_sessions, reset_session
+from core.menu import get_main_menu_keyboard, MENU_RESPONSES, BTN_DIET, BTN_SUPPORT
+from questions import get_total_all_questions, get_total_base_questions
 
-from core.sessions import get_session, reset_session, user_sessions
-from core.menu import BTN_DIET, BTN_SUPPORT, MENU_RESPONSES
-from core.keyboards import get_main_menu_keyboard
-
-# Conversation states (must match main.py)
-MAIN_MENU = 0
-ANSWERING = 1
-MULTI_SELECT = 2
-OTHER_TEXT = 3
-
-
-# ============================================================
-# send_question will be injected from flows module later.
-# For now, we import it at call-time to avoid circular imports.
-# ============================================================
+logger = logging.getLogger(__name__)
 
 
 async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -63,25 +45,8 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
 async def cmd_health(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Shortcut: directly start health assessment via /health command."""
     uid = update.effective_user.id
-    reset_session(uid)
-    session = get_session(uid)
-
-    first_id = get_first_question_id()
-    session["current_question_id"] = first_id
-    session["prev_question_id"] = None
-
-    await update.message.reply_text(
-        "🩺 <b>شروع ارزیابی سلامت پت</b>\n\n"
-        "📝 الان چند تا سؤال ازت می‌پرسم.\n"
-        "⏱ حدود ۵ تا ۱۰ دقیقه وقتت رو می‌گیره.\n\n"
-        "❌ هر لحظه می‌تونی «انصراف و بازگشت» رو بزنی.\n\n"
-        "بزن بریم! 👇",
-        parse_mode="HTML",
-    )
-
-    # Import here to avoid circular imports
-    from flows.assessment import send_question
-    return await send_question(uid, context)
+    from flows.health_flow import start_health_flow  # Lazy import
+    return await start_health_flow(uid, update, context)
 
 
 async def cmd_diet(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -117,3 +82,14 @@ async def cmd_stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"📋 سؤالات پایه: {get_total_base_questions()}",
         parse_mode="HTML",
     )
+
+
+async def post_init(application):
+    """Set bot commands so the ☰ menu button appears in Telegram."""
+    commands = [
+        BotCommand("start", "🐾 شروع ربات"),
+        BotCommand("health", "🩺 گزارش سلامت پت"),
+        BotCommand("support", "📞 پشتیبانی سریع"),
+    ]
+    await application.bot.set_my_commands(commands)
+    logger.info("✅ Bot menu commands set successfully!")
