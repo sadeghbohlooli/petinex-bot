@@ -15,9 +15,9 @@ logging.basicConfig(
     level=logging.DEBUG if DEBUG_MODE else logging.INFO,
 )
 
-def main():
+async def main():
     # مقداردهی اولیه دیتابیس
-    asyncio.run(init_db())
+    await init_db()
     print("✅ Database initialized.")
 
     if not BOT_TOKEN or not ADMIN_CHAT_ID:
@@ -60,7 +60,7 @@ def main():
     )
 
     print("✅ Petinex Bot (modular) is running!")
-    app.run_polling(drop_pending_updates=True)
+    await app.run_polling(drop_pending_updates=True)
 
 if __name__ == "__main__":
-    main()
+    asyncio.run(main())
