@@ -64,3 +64,26 @@ async def update_session_pets(uid: int):
     if uid in user_sessions and user_sessions[uid].get("user_id"):
         pets = await get_pets_by_user_id(user_sessions[uid]["user_id"])
         user_sessions[uid]["pets"] = pets
+
+async def ensure_user_session(update: Update, context: ContextTypes.DEFAULT_TYPE) -> dict:
+    """اطمینان از اینکه session کاربر وجود داره و از دیتابیس لود شده"""
+    uid = update.effective_user.id
+    if uid not in user_sessions:
+        # تلاش برای لود از دیتابیس
+        loaded = await load_user_to_session(uid, uid)  # telegram_id همون uid هست
+        if not loaded:
+            # کاربر جدید، یه session موقت می‌سازیم
+            user_sessions[uid] = {
+                "active_flow": None,
+                "current_question_id": None,
+                "prev_question_id": None,
+                "answers": {},
+                "multi_select_temp": [],
+                "waiting_for_other_text": False,
+                "other_text_variable": None,
+                "started_at": datetime.now().isoformat(),
+                "user_id": None,
+                "pets": [],
+                "user_data": None,
+            }
+    return user_sessions[uid]
