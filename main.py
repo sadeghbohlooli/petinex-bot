@@ -17,8 +17,12 @@ logging.basicConfig(
 )
 
 def main():
+    # ایجاد و تنظیم حلقه رویداد
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+
     # مقداردهی اولیه دیتابیس
-    asyncio.run(init_db())
+    loop.run_until_complete(init_db())
     print("✅ Database initialized.")
 
     if not BOT_TOKEN or not ADMIN_CHAT_ID:
