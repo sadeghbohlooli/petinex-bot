@@ -17,7 +17,7 @@ from questions.health_questions import (
     get_options_for_question,
     should_show_question,
     get_next_question_id,
-    get_first_question_id,
+    # get_first_question_id,  # غیرفعال موقت
     should_show_section_transition,
     QUESTION_FLOW,
 )
@@ -44,10 +44,8 @@ async def start_health_flow(uid: int, context: ContextTypes.DEFAULT_TYPE) -> int
     try:
         session = get_session(uid)
         session["active_flow"] = "health"
-        first_id = get_first_question_id()
-        if first_id is None:
-            await context.bot.send_message(chat_id=uid, text="❌ خطا: سوال اول پیدا نشد!")
-            return MAIN_MENU
+        # استفاده از مقدار ثابت ۱ برای اولین سوال (چون می‌دونیم سوال ۱ همیشه وجود داره)
+        first_id = 1
         session["current_question_id"] = first_id
         session["prev_question_id"] = None
         session["answers"] = {}
@@ -65,6 +63,8 @@ async def send_question(uid: int, context: ContextTypes.DEFAULT_TYPE) -> int:
     try:
         session = get_session(uid)
         qid = session.get("current_question_id")
+        # پیام دیباگ برای بررسی مقدار qid
+        await context.bot.send_message(chat_id=uid, text=f"DEBUG: qid={qid}")
         if qid is None:
             await context.bot.send_message(chat_id=uid, text="❌ خطا: سوال جاری مشخص نیست!")
             return MAIN_MENU
