@@ -1,3 +1,4 @@
+# main.py
 import asyncio
 import logging
 from telegram.ext import Application, CommandHandler, MessageHandler, ConversationHandler, filters
@@ -16,12 +17,8 @@ logging.basicConfig(
 )
 
 def main():
-    # ایجاد یک event loop جدید و تنظیم آن به عنوان حلقه فعلی
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
-
     # مقداردهی اولیه دیتابیس
-    loop.run_until_complete(init_db())
+    asyncio.run(init_db())
     print("✅ Database initialized.")
 
     if not BOT_TOKEN or not ADMIN_CHAT_ID:
@@ -64,8 +61,7 @@ def main():
     )
 
     print("✅ Petinex Bot (modular) is running!")
-    # اجرای برنامه با همان event loop
-    loop.run_until_complete(app.run_polling(drop_pending_updates=True))
+    app.run_polling(drop_pending_updates=True)
 
 if __name__ == "__main__":
     main()
