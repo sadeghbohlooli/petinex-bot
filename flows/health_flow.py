@@ -3,7 +3,7 @@ from datetime import datetime
 from telegram import Update
 from telegram.ext import ContextTypes
 
-from core.session import get_session, reset_session, ensure_user_session
+from core.session import get_session, reset_session
 from core.keyboards import (
     build_option_keyboard,
     build_multi_select_keyboard,
@@ -33,7 +33,6 @@ def get_progress_text(current_id: int, answers: dict) -> str:
         q = get_question_by_id(qid)
         if q and should_show_question(q, answers):
             active_questions.append(qid)
-    
     if current_id in active_questions:
         current_index = active_questions.index(current_id)
         total = len(active_questions)
@@ -45,8 +44,10 @@ def get_progress_text(current_id: int, answers: dict) -> str:
 async def start_health_flow(uid: int, context: ContextTypes.DEFAULT_TYPE) -> int:
     session = get_session(uid)
     session["active_flow"] = "health"
-    session["current_question_id"] = get_first_question_id()
+    first_id = get_first_question_id()
+    session["current_question_id"] = first_id
     session["prev_question_id"] = None
+    session["answers"] = {}  # ریست answers قبلی
     await context.bot.send_message(
         chat_id=uid,
         text="🩺 <b>شروع ارزیابی سلامت پت</b>\n\n📝 الان چند تا سؤال می‌پرسم.\n⏱ حدود ۵ تا ۱۰ دقیقه وقتت رو می‌گیره.\n\n❌ هر لحظه می‌تونی «انصراف و بازگشت» رو بزنی.\n\nبزن بریم! 👇",
@@ -56,9 +57,10 @@ async def start_health_flow(uid: int, context: ContextTypes.DEFAULT_TYPE) -> int
 
 async def send_question(uid: int, context: ContextTypes.DEFAULT_TYPE) -> int:
     session = get_session(uid)
-    qid = session["current_question_id"]
+    qid = session.get("current_question_id")
 
     if qid is None:
+        logger.error("current_question_id is None")
         return MAIN_MENU
 
     question = get_question_by_id(qid)
@@ -66,7 +68,7 @@ async def send_question(uid: int, context: ContextTypes.DEFAULT_TYPE) -> int:
         logger.error(f"Question ID {qid} not found!")
         return MAIN_MENU
 
-    answers = session["answers"]
+    answers = session.get("answers", {})
 
     transition_msg = should_show_section_transition(
         qid, session.get("prev_question_id"), answers
@@ -116,7 +118,6 @@ async def send_question(uid: int, context: ContextTypes.DEFAULT_TYPE) -> int:
         return ANSWERING
 
 async def handle_health_answer(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    await ensure_user_session(update, context)
     uid = update.effective_user.id
     user_text = update.message.text.strip()
 
@@ -132,7 +133,7 @@ async def handle_health_answer(update: Update, context: ContextTypes.DEFAULT_TYP
     if not question:
         return MAIN_MENU
 
-    answers = session["answers"]
+    answers = session.get("answers", {})
     q_type = question["type"]
     variable = question["variable"]
 
@@ -196,7 +197,6 @@ async def handle_health_answer(update: Update, context: ContextTypes.DEFAULT_TYP
     return ANSWERING
 
 async def handle_health_multi_select(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    await ensure_user_session(update, context)
     uid = update.effective_user.id
     user_text = update.message.text.strip()
 
@@ -209,12 +209,12 @@ async def handle_health_multi_select(update: Update, context: ContextTypes.DEFAU
     if not question:
         return MAIN_MENU
 
-    answers = session["answers"]
+    answers = session.get("answers", {})
     options = get_options_for_question(question, answers)
     confirm_text = question.get("confirm_button", "✅ تأیید و ادامه")
 
     if user_text == confirm_text:
-        final = session["multi_select_temp"] if session["multi_select_temp"] else ["none"]
+        final = session.get("multi_select_temp", []) if session.get("multi_select_temp") else ["none"]
         answers[question["variable"]] = final
         session["multi_select_temp"] = []
 
@@ -236,7 +236,7 @@ async def handle_health_multi_select(update: Update, context: ContextTypes.DEFAU
         await update.message.reply_text("⚠️ لطفاً یکی از گزینه‌ها رو انتخاب کن.")
         return MULTI_SELECT
 
-    temp = session["multi_select_temp"]
+    temp = session.get("multi_select_temp", [])
     exclusive = {"none", "all_normal", "nothing", "healthy", "dont_remember"}
     if value in exclusive:
         session["multi_select_temp"] = [value]
@@ -248,6 +248,7 @@ async def handle_health_multi_select(update: Update, context: ContextTypes.DEFAU
             temp.remove(value)
         else:
             temp.append(value)
+        session["multi_select_temp"] = temp
 
     progress_text = get_progress_text(qid, answers)
     pet_name = answers.get("pet_name", "پتت")
@@ -262,7 +263,7 @@ async def handle_health_multi_select(update: Update, context: ContextTypes.DEFAU
 async def advance(uid: int, context: ContextTypes.DEFAULT_TYPE) -> int:
     session = get_session(uid)
     current_id = session["current_question_id"]
-    answers = session["answers"]
+    answers = session.get("answers", {})
 
     next_id = get_next_question_id(current_id, answers)
     if next_id is None:
@@ -283,7 +284,7 @@ async def finish_health(uid: int, context: ContextTypes.DEFAULT_TYPE) -> int:
         full_name = "خطا"
         username = "خطا"
 
-    prompt = generate_health_prompt(session["answers"])
+    prompt = generate_health_prompt(session.get("answers", {}))
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
     header = (
@@ -293,7 +294,7 @@ async def finish_health(uid: int, context: ContextTypes.DEFAULT_TYPE) -> int:
         f"🆔 یوزرنیم: {username}\n"
         f"🔢 Chat ID: {uid}\n"
         f"⏰ زمان: {now}\n"
-        f"📊 تعداد پاسخ‌ها: {len(session['answers'])}\n"
+        f"📊 تعداد پاسخ‌ها: {len(session.get('answers', {}))}\n"
         f"{'─'*30}\n"
         f"💡 برای ارسال PDF، روی این پیام Reply کن.\n"
         f"{'─'*30}\n"
@@ -313,7 +314,6 @@ async def finish_health(uid: int, context: ContextTypes.DEFAULT_TYPE) -> int:
     return MAIN_MENU
 
 async def cancel_health(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    await ensure_user_session(update, context)
     uid = update.effective_user.id
     reset_session(uid)
     await update.message.reply_text(
