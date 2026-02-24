@@ -48,14 +48,14 @@ async def start_health_flow(uid: int, context: ContextTypes.DEFAULT_TYPE) -> int
         )
         return await send_question(uid, context)
     except Exception as e:
-        await context.bot.send_message(chat_id=uid, text=f"❌ خطا: {str(e)}")
+        await context.bot.send_message(chat_id=uid, text=f"❌ خطا در شروع ارزیابی: {str(e)}")
         return MAIN_MENU
 
 async def send_question(uid: int, context: ContextTypes.DEFAULT_TYPE) -> int:
     try:
         session = get_session(uid)
         qid = session.get("current_question_id")
-        
+
         # اگر qid وجود ندارد ولی کاربر در فلوی سلامت است، دوباره مقداردهی کن
         if qid is None:
             if session.get("active_flow") == "health":
@@ -63,16 +63,20 @@ async def send_question(uid: int, context: ContextTypes.DEFAULT_TYPE) -> int:
                 if first_id:
                     session["current_question_id"] = first_id
                     qid = first_id
+                    await context.bot.send_message(chat_id=uid, text="🔄 بازیابی خودکار سوال اول...")
                 else:
-                    await context.bot.send_message(chat_id=uid, text="❌ خطا: اولین سوال یافت نشد!")
+                    await context.bot.send_message(chat_id=uid, text="❌ خطای سیستمی: اولین سوال یافت نشد!")
+                    reset_session(uid)
                     return MAIN_MENU
             else:
-                await context.bot.send_message(chat_id=uid, text="❌ خطا: شناسه سؤال نامشخص!")
+                await context.bot.send_message(chat_id=uid, text="❌ خطا: شناسه سؤال نامشخص! لطفاً دوباره از منوی اصلی شروع کنید.")
+                reset_session(uid)
                 return MAIN_MENU
 
         question = get_question_by_id(qid)
         if not question:
-            await context.bot.send_message(chat_id=uid, text=f"❌ خطا: سؤال {qid} یافت نشد!")
+            await context.bot.send_message(chat_id=uid, text=f"❌ خطا: سؤال {qid} یافت نشد! لطفاً با پشتیبانی تماس بگیرید.")
+            reset_session(uid)
             return MAIN_MENU
 
         answers = session.get("answers", {})
@@ -122,7 +126,8 @@ async def send_question(uid: int, context: ContextTypes.DEFAULT_TYPE) -> int:
             return ANSWERING
 
     except Exception as e:
-        await context.bot.send_message(chat_id=uid, text=f"❌ خطا در ارسال سوال: {str(e)}")
+        await context.bot.send_message(chat_id=uid, text=f"❌ خطای غیرمنتظره در ارسال سوال: {str(e)}")
+        reset_session(uid)
         return MAIN_MENU
 
 async def handle_health_answer(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -135,10 +140,14 @@ async def handle_health_answer(update: Update, context: ContextTypes.DEFAULT_TYP
     session = get_session(uid)
     qid = session.get("current_question_id")
     if qid is None:
+        await update.message.reply_text("❌ خطا: اطلاعات جلسه از بین رفته. لطفاً دوباره از منوی اصلی شروع کنید.")
+        reset_session(uid)
         return MAIN_MENU
 
     question = get_question_by_id(qid)
     if not question:
+        await update.message.reply_text(f"❌ خطا: سؤال {qid} یافت نشد!")
+        reset_session(uid)
         return MAIN_MENU
 
     answers = session.get("answers", {})
@@ -215,6 +224,8 @@ async def handle_health_multi_select(update: Update, context: ContextTypes.DEFAU
     qid = session.get("current_question_id")
     question = get_question_by_id(qid)
     if not question:
+        await update.message.reply_text("❌ خطا: سؤال یافت نشد!")
+        reset_session(uid)
         return MAIN_MENU
 
     answers = session.get("answers", {})
@@ -329,4 +340,3 @@ async def cancel_health(update: Update, context: ContextTypes.DEFAULT_TYPE) -> i
         reply_markup=get_main_menu_keyboard(),
     )
     return MAIN_MENU
-    
