@@ -15,9 +15,13 @@ logging.basicConfig(
     level=logging.DEBUG if DEBUG_MODE else logging.INFO,
 )
 
-async def main():
+def main():
+    # ایجاد یک event loop جدید و تنظیم آن به عنوان حلقه فعلی
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+
     # مقداردهی اولیه دیتابیس
-    await init_db()
+    loop.run_until_complete(init_db())
     print("✅ Database initialized.")
 
     if not BOT_TOKEN or not ADMIN_CHAT_ID:
@@ -60,7 +64,8 @@ async def main():
     )
 
     print("✅ Petinex Bot (modular) is running!")
-    await app.run_polling(drop_pending_updates=True)
+    # اجرای برنامه با همان event loop
+    loop.run_until_complete(app.run_polling(drop_pending_updates=True))
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    main()
