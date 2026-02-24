@@ -1,13 +1,7 @@
 # core/keyboards.py
-"""ساخت کیبوردهای reply — مستقل از flow خاص."""
 from telegram import ReplyKeyboardMarkup, KeyboardButton
 
-
-def build_option_keyboard(options: list, cancel_btn: bool = True, one_time: bool = True) -> ReplyKeyboardMarkup:
-    """
-    ساخت کیبورد از لیست optionها (هر option: {"text": ..., "value": ...})
-    options: لیست دیکشنری‌های دارای کلید text
-    """
+def build_option_keyboard(options, cancel_btn=True, one_time=True):
     rows = []
     row = []
     for opt in options:
@@ -21,9 +15,7 @@ def build_option_keyboard(options: list, cancel_btn: bool = True, one_time: bool
         rows.append([KeyboardButton("❌ انصراف و بازگشت")])
     return ReplyKeyboardMarkup(rows, resize_keyboard=True, one_time_keyboard=one_time)
 
-
-def build_multi_select_keyboard(options: list, selected: list, confirm_text: str = "✅ تأیید و ادامه") -> ReplyKeyboardMarkup:
-    """ساخت کیبورد multi-select با چکمارک."""
+def build_multi_select_keyboard(options, selected, confirm_text="✅ تأیید و ادامه"):
     rows = []
     row = []
     for opt in options:
@@ -38,17 +30,13 @@ def build_multi_select_keyboard(options: list, selected: list, confirm_text: str
     rows.append([KeyboardButton("❌ انصراف و بازگشت")])
     return ReplyKeyboardMarkup(rows, resize_keyboard=True)
 
-
-def cancel_only_keyboard() -> ReplyKeyboardMarkup:
-    """کیبوردی که فقط دکمه انصراف دارد."""
+def cancel_only_keyboard():
     return ReplyKeyboardMarkup(
         [[KeyboardButton("❌ انصراف و بازگشت")]],
         resize_keyboard=True,
     )
 
-
-def find_option_value(options: list, user_text: str) -> str | None:
-    """پیدا کردن value یک گزینه از روی متن کاربر (با یا بدون چکمارک)."""
+def find_option_value(options, user_text):
     clean = user_text.replace(" ✅", "").strip()
     for opt in options:
         if opt["text"] == clean or opt["text"] == user_text:
