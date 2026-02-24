@@ -1,3 +1,4 @@
+# flows/health_flow.py
 import logging
 from datetime import datetime
 from telegram import Update
@@ -17,37 +18,19 @@ from questions.health_questions import (
     get_options_for_question,
     should_show_question,
     get_next_question_id,
+    get_first_question_id,
+    calculate_progress,
     should_show_section_transition,
-    QUESTION_FLOW,
 )
 from prompts.health_prompt import generate_health_prompt
 from config import ADMIN_CHAT_ID
 
 logger = logging.getLogger(__name__)
 
-def get_progress_text(current_id: int, answers: dict) -> str:
-    active_questions = []
-    for qid in QUESTION_FLOW:
-        q = get_question_by_id(qid)
-        if q and should_show_question(q, answers):
-            active_questions.append(qid)
-    if current_id in active_questions:
-        current_index = active_questions.index(current_id)
-        total = len(active_questions)
-        percent = int(((current_index + 1) / total) * 100)
-        return f"📊 سؤال {current_index + 1} از ~{total} ({percent}%)"
-    else:
-        return "📊 در حال محاسبه پیشرفت..."
-
 async def start_health_flow(uid: int, context: ContextTypes.DEFAULT_TYPE) -> int:
     session = get_session(uid)
     session["active_flow"] = "health"
-    session["answers"] = {}
-    session["multi_select_temp"] = []
-    session["waiting_for_other_text"] = False
-    session["other_text_variable"] = None
-    # اولین سوال: 1 (مطمئن هستیم سوال 1 وجود دارد)
-    session["current_question_id"] = 1
+    session["current_question_id"] = get_first_question_id()
     session["prev_question_id"] = None
     await context.bot.send_message(
         chat_id=uid,
@@ -58,18 +41,17 @@ async def start_health_flow(uid: int, context: ContextTypes.DEFAULT_TYPE) -> int
 
 async def send_question(uid: int, context: ContextTypes.DEFAULT_TYPE) -> int:
     session = get_session(uid)
-    qid = session.get("current_question_id")
-    # اگر qid None بود، از 1 استفاده کن
+    qid = session["current_question_id"]
+
     if qid is None:
-        qid = 1
-        session["current_question_id"] = 1
+        return MAIN_MENU
 
     question = get_question_by_id(qid)
     if not question:
-        await context.bot.send_message(chat_id=uid, text=f"❌ خطا: سوال با شناسه {qid} یافت نشد!")
+        logger.error(f"Question ID {qid} not found!")
         return MAIN_MENU
 
-    answers = session.get("answers", {})
+    answers = session["answers"]
 
     transition_msg = should_show_section_transition(
         qid, session.get("prev_question_id"), answers
@@ -77,10 +59,10 @@ async def send_question(uid: int, context: ContextTypes.DEFAULT_TYPE) -> int:
     if transition_msg:
         await context.bot.send_message(chat_id=uid, text=transition_msg, parse_mode="HTML")
 
-    progress_text = get_progress_text(qid, answers)
+    progress = calculate_progress(qid, answers)
     pet_name = answers.get("pet_name", "پتت")
     q_text = question["text"].replace("{pet_name}", pet_name)
-    text = f"{progress_text}\n\n{q_text}"
+    text = f"{progress}\n\n{q_text}"
     if question.get("micro_copy"):
         text += f"\n\n{question['micro_copy']}"
 
@@ -134,7 +116,7 @@ async def handle_health_answer(update: Update, context: ContextTypes.DEFAULT_TYP
     if not question:
         return MAIN_MENU
 
-    answers = session.get("answers", {})
+    answers = session["answers"]
     q_type = question["type"]
     variable = question["variable"]
 
@@ -210,12 +192,12 @@ async def handle_health_multi_select(update: Update, context: ContextTypes.DEFAU
     if not question:
         return MAIN_MENU
 
-    answers = session.get("answers", {})
+    answers = session["answers"]
     options = get_options_for_question(question, answers)
     confirm_text = question.get("confirm_button", "✅ تأیید و ادامه")
 
     if user_text == confirm_text:
-        final = session.get("multi_select_temp", []) if session.get("multi_select_temp") else ["none"]
+        final = session["multi_select_temp"] if session["multi_select_temp"] else ["none"]
         answers[question["variable"]] = final
         session["multi_select_temp"] = []
 
@@ -237,7 +219,7 @@ async def handle_health_multi_select(update: Update, context: ContextTypes.DEFAU
         await update.message.reply_text("⚠️ لطفاً یکی از گزینه‌ها رو انتخاب کن.")
         return MULTI_SELECT
 
-    temp = session.get("multi_select_temp", [])
+    temp = session["multi_select_temp"]
     exclusive = {"none", "all_normal", "nothing", "healthy", "dont_remember"}
     if value in exclusive:
         session["multi_select_temp"] = [value]
@@ -249,12 +231,11 @@ async def handle_health_multi_select(update: Update, context: ContextTypes.DEFAU
             temp.remove(value)
         else:
             temp.append(value)
-        session["multi_select_temp"] = temp
 
-    progress_text = get_progress_text(qid, answers)
+    progress = calculate_progress(qid, answers)
     pet_name = answers.get("pet_name", "پتت")
     q_text = question["text"].replace("{pet_name}", pet_name)
-    text = f"{progress_text}\n\n{q_text}"
+    text = f"{progress}\n\n{q_text}"
     if question.get("micro_copy"):
         text += f"\n\n{question['micro_copy']}"
     kb = build_multi_select_keyboard(options, session["multi_select_temp"], confirm_text)
@@ -264,7 +245,7 @@ async def handle_health_multi_select(update: Update, context: ContextTypes.DEFAU
 async def advance(uid: int, context: ContextTypes.DEFAULT_TYPE) -> int:
     session = get_session(uid)
     current_id = session["current_question_id"]
-    answers = session.get("answers", {})
+    answers = session["answers"]
 
     next_id = get_next_question_id(current_id, answers)
     if next_id is None:
@@ -285,7 +266,7 @@ async def finish_health(uid: int, context: ContextTypes.DEFAULT_TYPE) -> int:
         full_name = "خطا"
         username = "خطا"
 
-    prompt = generate_health_prompt(session.get("answers", {}))
+    prompt = generate_health_prompt(session["answers"])
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
     header = (
@@ -295,7 +276,7 @@ async def finish_health(uid: int, context: ContextTypes.DEFAULT_TYPE) -> int:
         f"🆔 یوزرنیم: {username}\n"
         f"🔢 Chat ID: {uid}\n"
         f"⏰ زمان: {now}\n"
-        f"📊 تعداد پاسخ‌ها: {len(session.get('answers', {}))}\n"
+        f"📊 تعداد پاسخ‌ها: {len(session['answers'])}\n"
         f"{'─'*30}\n"
         f"💡 برای ارسال PDF، روی این پیام Reply کن.\n"
         f"{'─'*30}\n"
