@@ -27,10 +27,8 @@ from config import ADMIN_CHAT_ID
 logger = logging.getLogger(__name__)
 
 async def ensure_health_session(uid: int) -> dict:
-    """اطمینان از اینکه session کاربر برای فلوی سلامت مقداردهی شده است."""
     session = get_session(uid)
     if session.get("active_flow") != "health":
-        # کاربر در فلوی سلامت نیست، ریست می‌کنیم و دوباره شروع می‌کنیم
         reset_session(uid)
         session = get_session(uid)
         session["active_flow"] = "health"
@@ -40,9 +38,10 @@ async def ensure_health_session(uid: int) -> dict:
         session["multi_select_temp"] = []
         session["waiting_for_other_text"] = False
         session["other_text_variable"] = None
+        logger.info(f"New health session for {uid}, first question: {session['current_question_id']}")
     elif session.get("current_question_id") is None:
-        # در فلوی سلامت است اما سؤال جاری ندارد → اولین سؤال را بگذار
         session["current_question_id"] = get_first_question_id()
+        logger.info(f"Session had no current question, reset to first: {session['current_question_id']}")
     return session
 
 async def start_health_flow(uid: int, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -67,7 +66,6 @@ async def send_question(uid: int, context: ContextTypes.DEFAULT_TYPE) -> int:
     try:
         session = await ensure_health_session(uid)
         qid = session.get("current_question_id")
-
         if qid is None:
             await context.bot.send_message(chat_id=uid, text="❌ خطا: شناسه سؤال نامشخص! لطفاً دوباره از منوی اصلی شروع کنید.")
             reset_session(uid)
@@ -75,7 +73,7 @@ async def send_question(uid: int, context: ContextTypes.DEFAULT_TYPE) -> int:
 
         question = get_question_by_id(qid)
         if not question:
-            await context.bot.send_message(chat_id=uid, text=f"❌ خطا: سؤال {qid} یافت نشد! لطفاً با پشتیبانی تماس بگیرید.")
+            await context.bot.send_message(chat_id=uid, text=f"❌ خطا: سؤال {qid} یافت نشد!")
             reset_session(uid)
             return MAIN_MENU
 
@@ -167,12 +165,14 @@ async def handle_health_answer(update: Update, context: ContextTypes.DEFAULT_TYP
             value = find_option_value(question["options"], user_text)
             if value:
                 answers[variable] = value
-                return await advance(uid, context)
-            answers[variable] = user_text
+            else:
+                answers[variable] = user_text
+            await update.message.reply_text(f"✅ پاسخ شما ثبت شد.")
             return await advance(uid, context)
 
         if q_type == "text_input":
             answers[variable] = user_text
+            await update.message.reply_text(f"✅ پاسخ شما ثبت شد.")
             return await advance(uid, context)
 
         if q_type == "number_input":
@@ -186,13 +186,13 @@ async def handle_health_answer(update: Update, context: ContextTypes.DEFAULT_TYP
             except ValueError:
                 await update.message.reply_text("❌ لطفاً یک عدد معتبر وارد کن.")
                 return ANSWERING
-
             num_range = question.get("number_range")
             if num_range:
                 if num_val < num_range["min"] or num_val > num_range["max"]:
                     await update.message.reply_text(f"❌ عدد باید بین {num_range['min']} و {num_range['max']} باشه.")
                     return ANSWERING
             answers[variable] = num_val
+            await update.message.reply_text(f"✅ عدد {num_val} ثبت شد.")
             return await advance(uid, context)
 
         if q_type == "inline_button":
@@ -201,15 +201,14 @@ async def handle_health_answer(update: Update, context: ContextTypes.DEFAULT_TYP
             if value is None:
                 await update.message.reply_text("⚠️ لطفاً یکی از گزینه‌ها رو انتخاب کن.")
                 return ANSWERING
-
             if value == "_other" and question.get("has_other_text"):
                 answers[variable] = "_other"
                 session["waiting_for_other_text"] = True
                 session["other_text_variable"] = variable + "_detail"
                 await update.message.reply_text("✏️ لطفاً بنویس:", reply_markup=cancel_only_keyboard())
                 return ANSWERING
-
             answers[variable] = value
+            await update.message.reply_text(f"✅ گزینه انتخاب شده ثبت شد.")
             return await advance(uid, context)
 
         return ANSWERING
@@ -242,18 +241,7 @@ async def handle_health_multi_select(update: Update, context: ContextTypes.DEFAU
             final = session.get("multi_select_temp", []) if session.get("multi_select_temp") else ["none"]
             answers[question["variable"]] = final
             session["multi_select_temp"] = []
-
-            if final != ["none"]:
-                selected_texts = [opt["text"] for opt in options if opt["value"] in final]
-                if selected_texts:
-                    await update.message.reply_text("✅ انتخاب‌های شما:\n" + "\n".join(f"  • {t}" for t in selected_texts))
-
-            if "_other" in final and question.get("has_other_text"):
-                session["waiting_for_other_text"] = True
-                session["other_text_variable"] = question["variable"] + "_detail"
-                await update.message.reply_text("✏️ لطفاً جزئیات رو بنویس:", reply_markup=cancel_only_keyboard())
-                return ANSWERING
-
+            await update.message.reply_text("✅ انتخاب شما ثبت شد.")
             return await advance(uid, context)
 
         value = find_option_value(options, user_text)
@@ -293,12 +281,14 @@ async def advance(uid: int, context: ContextTypes.DEFAULT_TYPE) -> int:
     session = await ensure_health_session(uid)
     current_id = session.get("current_question_id")
     if current_id is None:
-        # اگر باز هم None بود، ریست می‌کنیم و به منو برمی‌گردیم
+        logger.error(f"Advance called with no current_question_id for user {uid}")
         reset_session(uid)
         return MAIN_MENU
-    answers = session.get("answers", {})
 
+    answers = session.get("answers", {})
     next_id = get_next_question_id(current_id, answers)
+    logger.info(f"Advance from {current_id} to {next_id} for user {uid}")
+
     if next_id is None:
         return await finish_health(uid, context)
     else:
@@ -354,4 +344,3 @@ async def cancel_health(update: Update, context: ContextTypes.DEFAULT_TYPE) -> i
         reply_markup=get_main_menu_keyboard(),
     )
     return MAIN_MENU
-    
