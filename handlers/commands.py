@@ -1,3 +1,4 @@
+# handlers/commands.py
 from telegram import Update, BotCommand
 from telegram.ext import ContextTypes
 from core.session import ensure_user_session, reset_session, get_all_sessions
@@ -7,23 +8,14 @@ from flows.health_flow import start_health_flow
 from config import ADMIN_CHAT_ID
 
 async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    # اطمینان از وجود session و لود اطلاعات از دیتابیس
+    # اطمینان از وجود کاربر در دیتابیس و لود session
     session = await ensure_user_session(update, context)
     uid = update.effective_user.id
 
-    if session.get("user_id"):
-        # کاربر قبلاً عضو شده
-        welcome = (
-            "🐾 <b>به پتینکس خوش برگشتی!</b>\n\n"
-            "🏠 از منوی زیر یکی از خدمات رو انتخاب کن:\n\n"
-            "🩺 <b>گزارش سلامت پت</b> — ارزیابی هوشمند سلامت\n"
-            "🥗 <b>دریافت رژیم غذایی</b> — رژیم اختصاصی\n"
-            "👨‍⚕️ <b>دامپزشک آنلاین</b> — مشاوره با متخصص\n"
-            "📞 <b>پشتیبانی سریع</b> — ارتباط با تیم ما\n\n"
-            "👇 یکی رو انتخاب کن!"
-        )
-    else:
-        # کاربر جدید
+    # بررسی سطح عضویت (بعداً تکمیل می‌شود)
+    if session.get("user_data", {}).get("membership_level") == "bronze":
+        # کاربر تازه‌وارد که اطلاعات کمی دارد، می‌توانیم او را به فلوی عضویت هدایت کنیم
+        # اما فعلاً همان منو را نشان می‌دهیم
         welcome = (
             "🐾 <b>به پتینکس خوش آمدید!</b>\n\n"
             "🏠 از منوی زیر یکی از خدمات رو انتخاب کن:\n\n"
@@ -32,6 +24,12 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
             "👨‍⚕️ <b>دامپزشک آنلاین</b> — مشاوره با متخصص\n"
             "📞 <b>پشتیبانی سریع</b> — ارتباط با تیم ما\n\n"
             "👇 یکی رو انتخاب کن!"
+        )
+    else:
+        # کاربر قدیمی‌تر
+        welcome = (
+            "🐾 <b>به پتینکس خوش برگشتی!</b>\n\n"
+            "🏠 از منوی زیر خدمات مورد نظرت رو انتخاب کن."
         )
 
     await update.message.reply_text(welcome, parse_mode="HTML", reply_markup=get_main_menu_keyboard())
