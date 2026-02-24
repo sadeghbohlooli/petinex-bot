@@ -1,4 +1,3 @@
-# main.py (نسخه کامل async)
 import asyncio
 import logging
 from telegram.ext import Application, CommandHandler, MessageHandler, ConversationHandler, filters
@@ -16,9 +15,9 @@ logging.basicConfig(
     level=logging.DEBUG if DEBUG_MODE else logging.INFO,
 )
 
-async def main():
+def main():
     # مقداردهی اولیه دیتابیس
-    await init_db()
+    asyncio.run(init_db())
     print("✅ Database initialized.")
 
     if not BOT_TOKEN or not ADMIN_CHAT_ID:
@@ -61,7 +60,7 @@ async def main():
     )
 
     print("✅ Petinex Bot (modular) is running!")
-    await app.run_polling(drop_pending_updates=True)
+    app.run_polling(drop_pending_updates=True)
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    main()
