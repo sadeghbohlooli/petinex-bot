@@ -940,7 +940,7 @@ QUESTIONS = [
 # QUESTION FLOW ORDER
 # ============================================================
 QUESTION_FLOW = [
-    1, "4a", "4b", 5, 6, "6a",
+    1, 2, 3, 4, "4a", "4b", 5, 6, "6a",
     7, "7a", "7b", 8, 9, 10, 11, 12, 13,
     14, 15, 16, "16_kg", "16_feel", 17,
     18, 19, 20,
@@ -1037,6 +1037,21 @@ def calculate_progress(current_id, user_answers):
         idx = active_questions.index(current_id)
         return int((idx / len(active_questions)) * 100)
     return 0
+
+# ==================== اضافه شده برای شماره سؤال ====================
+def get_current_question_number(current_id, user_answers):
+    """برمی‌گرداند چندمین سؤال (از ۱) است که تا الان واقعاً نمایش داده شده."""
+    count = 0
+    for qid in QUESTION_FLOW:
+        q = get_question_by_id(qid)
+        if q and should_show_question(q, user_answers):
+            count += 1
+            if qid == current_id:
+                return count
+    return 1  # fallback
+
+# تعداد تقریبی کل سوالات
+TOTAL_QUESTIONS_APPROX = 33
 
 # ==================== prompts/health_prompt.py ====================
 def generate_health_prompt(answers: dict) -> str:
@@ -1146,10 +1161,14 @@ async def send_question(uid: int, context: ContextTypes.DEFAULT_TYPE) -> int:
     if transition_msg:
         await context.bot.send_message(chat_id=uid, text=transition_msg, parse_mode="HTML")
 
+    # محاسبه شماره سؤال و درصد
+    current_num = get_current_question_number(qid, answers)
     progress = calculate_progress(qid, answers)
+    header = f"📊 سؤال {current_num} از ~{TOTAL_QUESTIONS_APPROX} ({progress}%)"
+
     pet_name = answers.get("pet_name", "پتت")
     q_text = question["text"].replace("{pet_name}", pet_name)
-    text = f"{progress}\n\n{q_text}"
+    text = f"{header}\n\n{q_text}"
     if question.get("micro_copy"):
         text += f"\n\n{question['micro_copy']}"
 
