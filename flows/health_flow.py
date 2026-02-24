@@ -17,7 +17,6 @@ from questions.health_questions import (
     get_options_for_question,
     should_show_question,
     get_next_question_id,
-    # get_first_question_id,  # غیرفعال موقت
     should_show_section_transition,
     QUESTION_FLOW,
 )
@@ -41,91 +40,83 @@ def get_progress_text(current_id: int, answers: dict) -> str:
         return "📊 در حال محاسبه پیشرفت..."
 
 async def start_health_flow(uid: int, context: ContextTypes.DEFAULT_TYPE) -> int:
-    try:
-        session = get_session(uid)
-        session["active_flow"] = "health"
-        # استفاده از مقدار ثابت ۱ برای اولین سوال (چون می‌دونیم سوال ۱ همیشه وجود داره)
-        first_id = 1
-        session["current_question_id"] = first_id
-        session["prev_question_id"] = None
-        session["answers"] = {}
-        await context.bot.send_message(
-            chat_id=uid,
-            text="🩺 <b>شروع ارزیابی سلامت پت</b>\n\n📝 الان چند تا سؤال می‌پرسم.\n⏱ حدود ۵ تا ۱۰ دقیقه وقتت رو می‌گیره.\n\n❌ هر لحظه می‌تونی «انصراف و بازگشت» رو بزنی.\n\nبزن بریم! 👇",
-            parse_mode="HTML",
-        )
-        return await send_question(uid, context)
-    except Exception as e:
-        await context.bot.send_message(chat_id=uid, text=f"❌ خطا در شروع ارزیابی: {str(e)}")
-        return MAIN_MENU
+    session = get_session(uid)
+    session["active_flow"] = "health"
+    session["answers"] = {}
+    session["multi_select_temp"] = []
+    session["waiting_for_other_text"] = False
+    session["other_text_variable"] = None
+    # اولین سوال: 1 (مطمئن هستیم سوال 1 وجود دارد)
+    session["current_question_id"] = 1
+    session["prev_question_id"] = None
+    await context.bot.send_message(
+        chat_id=uid,
+        text="🩺 <b>شروع ارزیابی سلامت پت</b>\n\n📝 الان چند تا سؤال می‌پرسم.\n⏱ حدود ۵ تا ۱۰ دقیقه وقتت رو می‌گیره.\n\n❌ هر لحظه می‌تونی «انصراف و بازگشت» رو بزنی.\n\nبزن بریم! 👇",
+        parse_mode="HTML",
+    )
+    return await send_question(uid, context)
 
 async def send_question(uid: int, context: ContextTypes.DEFAULT_TYPE) -> int:
-    try:
-        session = get_session(uid)
-        qid = session.get("current_question_id")
-        # پیام دیباگ برای بررسی مقدار qid
-        await context.bot.send_message(chat_id=uid, text=f"DEBUG: qid={qid}")
-        if qid is None:
-            await context.bot.send_message(chat_id=uid, text="❌ خطا: سوال جاری مشخص نیست!")
-            return MAIN_MENU
+    session = get_session(uid)
+    qid = session.get("current_question_id")
+    # اگر qid None بود، از 1 استفاده کن
+    if qid is None:
+        qid = 1
+        session["current_question_id"] = 1
 
-        question = get_question_by_id(qid)
-        if not question:
-            await context.bot.send_message(chat_id=uid, text=f"❌ خطا: سوال با شناسه {qid} یافت نشد!")
-            return MAIN_MENU
-
-        answers = session.get("answers", {})
-
-        transition_msg = should_show_section_transition(
-            qid, session.get("prev_question_id"), answers
-        )
-        if transition_msg:
-            await context.bot.send_message(chat_id=uid, text=transition_msg, parse_mode="HTML")
-
-        progress_text = get_progress_text(qid, answers)
-        pet_name = answers.get("pet_name", "پتت")
-        q_text = question["text"].replace("{pet_name}", pet_name)
-        text = f"{progress_text}\n\n{q_text}"
-        if question.get("micro_copy"):
-            text += f"\n\n{question['micro_copy']}"
-
-        q_type = question["type"]
-        options = get_options_for_question(question, answers)
-
-        if q_type == "text_input":
-            if options:
-                kb = build_option_keyboard(options)
-            else:
-                kb = cancel_only_keyboard()
-            if question.get("placeholder"):
-                text += f"\n\n💡 {question['placeholder']}"
-            await context.bot.send_message(chat_id=uid, text=text, parse_mode="HTML", reply_markup=kb)
-            return ANSWERING
-
-        elif q_type == "number_input":
-            kb = cancel_only_keyboard()
-            if question.get("placeholder"):
-                text += f"\n\n💡 {question['placeholder']}"
-            num_range = question.get("number_range")
-            if num_range:
-                text += f"\n(محدوده مجاز: {num_range['min']} تا {num_range['max']})"
-            await context.bot.send_message(chat_id=uid, text=text, parse_mode="HTML", reply_markup=kb)
-            return ANSWERING
-
-        elif q_type == "multi_select":
-            session["multi_select_temp"] = []
-            kb = build_multi_select_keyboard(options, [], question.get("confirm_button", "✅ تأیید و ادامه"))
-            await context.bot.send_message(chat_id=uid, text=text, parse_mode="HTML", reply_markup=kb)
-            return MULTI_SELECT
-
-        else:  # inline_button
-            kb = build_option_keyboard(options)
-            await context.bot.send_message(chat_id=uid, text=text, parse_mode="HTML", reply_markup=kb)
-            return ANSWERING
-
-    except Exception as e:
-        await context.bot.send_message(chat_id=uid, text=f"❌ خطا در ارسال سوال: {str(e)}")
+    question = get_question_by_id(qid)
+    if not question:
+        await context.bot.send_message(chat_id=uid, text=f"❌ خطا: سوال با شناسه {qid} یافت نشد!")
         return MAIN_MENU
+
+    answers = session.get("answers", {})
+
+    transition_msg = should_show_section_transition(
+        qid, session.get("prev_question_id"), answers
+    )
+    if transition_msg:
+        await context.bot.send_message(chat_id=uid, text=transition_msg, parse_mode="HTML")
+
+    progress_text = get_progress_text(qid, answers)
+    pet_name = answers.get("pet_name", "پتت")
+    q_text = question["text"].replace("{pet_name}", pet_name)
+    text = f"{progress_text}\n\n{q_text}"
+    if question.get("micro_copy"):
+        text += f"\n\n{question['micro_copy']}"
+
+    q_type = question["type"]
+    options = get_options_for_question(question, answers)
+
+    if q_type == "text_input":
+        if options:
+            kb = build_option_keyboard(options)
+        else:
+            kb = cancel_only_keyboard()
+        if question.get("placeholder"):
+            text += f"\n\n💡 {question['placeholder']}"
+        await context.bot.send_message(chat_id=uid, text=text, parse_mode="HTML", reply_markup=kb)
+        return ANSWERING
+
+    elif q_type == "number_input":
+        kb = cancel_only_keyboard()
+        if question.get("placeholder"):
+            text += f"\n\n💡 {question['placeholder']}"
+        num_range = question.get("number_range")
+        if num_range:
+            text += f"\n(محدوده مجاز: {num_range['min']} تا {num_range['max']})"
+        await context.bot.send_message(chat_id=uid, text=text, parse_mode="HTML", reply_markup=kb)
+        return ANSWERING
+
+    elif q_type == "multi_select":
+        session["multi_select_temp"] = []
+        kb = build_multi_select_keyboard(options, [], question.get("confirm_button", "✅ تأیید و ادامه"))
+        await context.bot.send_message(chat_id=uid, text=text, parse_mode="HTML", reply_markup=kb)
+        return MULTI_SELECT
+
+    else:  # inline_button
+        kb = build_option_keyboard(options)
+        await context.bot.send_message(chat_id=uid, text=text, parse_mode="HTML", reply_markup=kb)
+        return ANSWERING
 
 async def handle_health_answer(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     uid = update.effective_user.id
