@@ -1,4 +1,3 @@
-# flows/health_flow.py
 import logging
 from datetime import datetime
 from telegram import Update
@@ -28,82 +27,88 @@ from config import ADMIN_CHAT_ID
 logger = logging.getLogger(__name__)
 
 async def start_health_flow(uid: int, context: ContextTypes.DEFAULT_TYPE) -> int:
-    session = get_session(uid)
-    session["active_flow"] = "health"
-    session["current_question_id"] = get_first_question_id()
-    session["prev_question_id"] = None
-    await context.bot.send_message(
-        chat_id=uid,
-        text="🩺 <b>شروع ارزیابی سلامت پت</b>\n\n📝 الان چند تا سؤال می‌پرسم.\n⏱ حدود ۵ تا ۱۰ دقیقه وقتت رو می‌گیره.\n\n❌ هر لحظه می‌تونی «انصراف و بازگشت» رو بزنی.\n\nبزن بریم! 👇",
-        parse_mode="HTML",
-    )
-    return await send_question(uid, context)
+    try:
+        session = get_session(uid)
+        session["active_flow"] = "health"
+        first_id = get_first_question_id()
+        if first_id is None:
+            await context.bot.send_message(chat_id=uid, text="❌ خطای سیستمی: اولین سوال یافت نشد!")
+            return MAIN_MENU
+        session["current_question_id"] = first_id
+        session["prev_question_id"] = None
+        session["answers"] = {}
+        await context.bot.send_message(
+            chat_id=uid,
+            text="🩺 <b>شروع ارزیابی سلامت پت</b>\n\n📝 الان چند تا سؤال می‌پرسم.\n⏱ حدود ۵ تا ۱۰ دقیقه وقتت رو می‌گیره.\n\n❌ هر لحظه می‌تونی «انصراف و بازگشت» رو بزنی.\n\nبزن بریم! 👇",
+            parse_mode="HTML",
+        )
+        return await send_question(uid, context)
+    except Exception as e:
+        await context.bot.send_message(chat_id=uid, text=f"❌ خطا: {str(e)}")
+        return MAIN_MENU
 
 async def send_question(uid: int, context: ContextTypes.DEFAULT_TYPE) -> int:
-    session = get_session(uid)
-    qid = session["current_question_id"]
+    try:
+        session = get_session(uid)
+        qid = session.get("current_question_id")
+        if qid is None:
+            await context.bot.send_message(chat_id=uid, text="❌ خطا: شناسه سؤال نامشخص!")
+            return MAIN_MENU
 
-    if qid is None:
-        return MAIN_MENU
+        question = get_question_by_id(qid)
+        if not question:
+            await context.bot.send_message(chat_id=uid, text=f"❌ خطا: سؤال {qid} یافت نشد!")
+            return MAIN_MENU
 
-    question = get_question_by_id(qid)
-    if not question:
-        logger.error(f"Question ID {qid} not found!")
-        return MAIN_MENU
+        answers = session.get("answers", {})
+        transition_msg = should_show_section_transition(qid, session.get("prev_question_id"), answers)
+        if transition_msg:
+            await context.bot.send_message(chat_id=uid, text=transition_msg, parse_mode="HTML")
 
-    answers = session["answers"]
+        progress = calculate_progress(qid, answers)
+        pet_name = answers.get("pet_name", "پتت")
+        q_text = question["text"].replace("{pet_name}", pet_name)
+        text = f"{progress}\n\n{q_text}"
+        if question.get("micro_copy"):
+            text += f"\n\n{question['micro_copy']}"
 
-    transition_msg = should_show_section_transition(
-        qid, session.get("prev_question_id"), answers
-    )
-    if transition_msg:
-        await context.bot.send_message(chat_id=uid, text=transition_msg, parse_mode="HTML")
+        q_type = question["type"]
+        options = get_options_for_question(question, answers)
 
-    progress = calculate_progress(qid, answers)
-    pet_name = answers.get("pet_name", "پتت")
-    q_text = question["text"].replace("{pet_name}", pet_name)
-    text = f"{progress}\n\n{q_text}"
-    if question.get("micro_copy"):
-        text += f"\n\n{question['micro_copy']}"
-
-    q_type = question["type"]
-    options = get_options_for_question(question, answers)
-
-    if q_type == "text_input":
-        if options:
-            kb = build_option_keyboard(options)
-        else:
+        if q_type == "text_input":
+            if options:
+                kb = build_option_keyboard(options)
+            else:
+                kb = cancel_only_keyboard()
+            if question.get("placeholder"):
+                text += f"\n\n💡 {question['placeholder']}"
+            await context.bot.send_message(chat_id=uid, text=text, parse_mode="HTML", reply_markup=kb)
+            return ANSWERING
+        elif q_type == "number_input":
             kb = cancel_only_keyboard()
-        if question.get("placeholder"):
-            text += f"\n\n💡 {question['placeholder']}"
-        await context.bot.send_message(chat_id=uid, text=text, parse_mode="HTML", reply_markup=kb)
-        return ANSWERING
-
-    elif q_type == "number_input":
-        kb = cancel_only_keyboard()
-        if question.get("placeholder"):
-            text += f"\n\n💡 {question['placeholder']}"
-        num_range = question.get("number_range")
-        if num_range:
-            text += f"\n(محدوده مجاز: {num_range['min']} تا {num_range['max']})"
-        await context.bot.send_message(chat_id=uid, text=text, parse_mode="HTML", reply_markup=kb)
-        return ANSWERING
-
-    elif q_type == "multi_select":
-        session["multi_select_temp"] = []
-        kb = build_multi_select_keyboard(options, [], question.get("confirm_button", "✅ تأیید و ادامه"))
-        await context.bot.send_message(chat_id=uid, text=text, parse_mode="HTML", reply_markup=kb)
-        return MULTI_SELECT
-
-    else:  # inline_button
-        kb = build_option_keyboard(options)
-        await context.bot.send_message(chat_id=uid, text=text, parse_mode="HTML", reply_markup=kb)
-        return ANSWERING
+            if question.get("placeholder"):
+                text += f"\n\n💡 {question['placeholder']}"
+            num_range = question.get("number_range")
+            if num_range:
+                text += f"\n(محدوده مجاز: {num_range['min']} تا {num_range['max']})"
+            await context.bot.send_message(chat_id=uid, text=text, parse_mode="HTML", reply_markup=kb)
+            return ANSWERING
+        elif q_type == "multi_select":
+            session["multi_select_temp"] = []
+            kb = build_multi_select_keyboard(options, [], question.get("confirm_button", "✅ تأیید و ادامه"))
+            await context.bot.send_message(chat_id=uid, text=text, parse_mode="HTML", reply_markup=kb)
+            return MULTI_SELECT
+        else:  # inline_button
+            kb = build_option_keyboard(options)
+            await context.bot.send_message(chat_id=uid, text=text, parse_mode="HTML", reply_markup=kb)
+            return ANSWERING
+    except Exception as e:
+        await context.bot.send_message(chat_id=uid, text=f"❌ خطا در ارسال سوال: {str(e)}")
+        return MAIN_MENU
 
 async def handle_health_answer(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     uid = update.effective_user.id
     user_text = update.message.text.strip()
-
     if user_text == "❌ انصراف و بازگشت":
         return await cancel_health(update, context)
 
@@ -116,7 +121,7 @@ async def handle_health_answer(update: Update, context: ContextTypes.DEFAULT_TYP
     if not question:
         return MAIN_MENU
 
-    answers = session["answers"]
+    answers = session.get("answers", {})
     q_type = question["type"]
     variable = question["variable"]
 
@@ -151,7 +156,6 @@ async def handle_health_answer(update: Update, context: ContextTypes.DEFAULT_TYP
         except ValueError:
             await update.message.reply_text("❌ لطفاً یک عدد معتبر وارد کن.")
             return ANSWERING
-
         num_range = question.get("number_range")
         if num_range:
             if num_val < num_range["min"] or num_val > num_range["max"]:
@@ -166,14 +170,12 @@ async def handle_health_answer(update: Update, context: ContextTypes.DEFAULT_TYP
         if value is None:
             await update.message.reply_text("⚠️ لطفاً یکی از گزینه‌ها رو انتخاب کن.")
             return ANSWERING
-
         if value == "_other" and question.get("has_other_text"):
             answers[variable] = "_other"
             session["waiting_for_other_text"] = True
             session["other_text_variable"] = variable + "_detail"
             await update.message.reply_text("✏️ لطفاً بنویس:", reply_markup=cancel_only_keyboard())
             return ANSWERING
-
         answers[variable] = value
         return await advance(uid, context)
 
@@ -182,7 +184,6 @@ async def handle_health_answer(update: Update, context: ContextTypes.DEFAULT_TYP
 async def handle_health_multi_select(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     uid = update.effective_user.id
     user_text = update.message.text.strip()
-
     if user_text == "❌ انصراف و بازگشت":
         return await cancel_health(update, context)
 
@@ -192,26 +193,23 @@ async def handle_health_multi_select(update: Update, context: ContextTypes.DEFAU
     if not question:
         return MAIN_MENU
 
-    answers = session["answers"]
+    answers = session.get("answers", {})
     options = get_options_for_question(question, answers)
     confirm_text = question.get("confirm_button", "✅ تأیید و ادامه")
 
     if user_text == confirm_text:
-        final = session["multi_select_temp"] if session["multi_select_temp"] else ["none"]
+        final = session.get("multi_select_temp", []) if session.get("multi_select_temp") else ["none"]
         answers[question["variable"]] = final
         session["multi_select_temp"] = []
-
         if final != ["none"]:
             selected_texts = [opt["text"] for opt in options if opt["value"] in final]
             if selected_texts:
                 await update.message.reply_text("✅ انتخاب‌های شما:\n" + "\n".join(f"  • {t}" for t in selected_texts))
-
         if "_other" in final and question.get("has_other_text"):
             session["waiting_for_other_text"] = True
             session["other_text_variable"] = question["variable"] + "_detail"
             await update.message.reply_text("✏️ لطفاً جزئیات رو بنویس:", reply_markup=cancel_only_keyboard())
             return ANSWERING
-
         return await advance(uid, context)
 
     value = find_option_value(options, user_text)
@@ -219,7 +217,7 @@ async def handle_health_multi_select(update: Update, context: ContextTypes.DEFAU
         await update.message.reply_text("⚠️ لطفاً یکی از گزینه‌ها رو انتخاب کن.")
         return MULTI_SELECT
 
-    temp = session["multi_select_temp"]
+    temp = session.get("multi_select_temp", [])
     exclusive = {"none", "all_normal", "nothing", "healthy", "dont_remember"}
     if value in exclusive:
         session["multi_select_temp"] = [value]
@@ -231,6 +229,7 @@ async def handle_health_multi_select(update: Update, context: ContextTypes.DEFAU
             temp.remove(value)
         else:
             temp.append(value)
+        session["multi_select_temp"] = temp
 
     progress = calculate_progress(qid, answers)
     pet_name = answers.get("pet_name", "پتت")
@@ -245,8 +244,7 @@ async def handle_health_multi_select(update: Update, context: ContextTypes.DEFAU
 async def advance(uid: int, context: ContextTypes.DEFAULT_TYPE) -> int:
     session = get_session(uid)
     current_id = session["current_question_id"]
-    answers = session["answers"]
-
+    answers = session.get("answers", {})
     next_id = get_next_question_id(current_id, answers)
     if next_id is None:
         return await finish_health(uid, context)
@@ -257,7 +255,6 @@ async def advance(uid: int, context: ContextTypes.DEFAULT_TYPE) -> int:
 
 async def finish_health(uid: int, context: ContextTypes.DEFAULT_TYPE) -> int:
     session = get_session(uid)
-
     try:
         chat = await context.bot.get_chat(uid)
         full_name = chat.full_name or "ناشناس"
@@ -266,9 +263,8 @@ async def finish_health(uid: int, context: ContextTypes.DEFAULT_TYPE) -> int:
         full_name = "خطا"
         username = "خطا"
 
-    prompt = generate_health_prompt(session["answers"])
+    prompt = generate_health_prompt(session.get("answers", {}))
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-
     header = (
         f"🔔 ارزیابی جدید دریافت شد!\n"
         f"{'─'*30}\n"
@@ -276,12 +272,11 @@ async def finish_health(uid: int, context: ContextTypes.DEFAULT_TYPE) -> int:
         f"🆔 یوزرنیم: {username}\n"
         f"🔢 Chat ID: {uid}\n"
         f"⏰ زمان: {now}\n"
-        f"📊 تعداد پاسخ‌ها: {len(session['answers'])}\n"
+        f"📊 تعداد پاسخ‌ها: {len(session.get('answers', {}))}\n"
         f"{'─'*30}\n"
         f"💡 برای ارسال PDF، روی این پیام Reply کن.\n"
         f"{'─'*30}\n"
     )
-
     full_msg = header + "\n" + prompt
     for i in range(0, len(full_msg), 4000):
         await context.bot.send_message(chat_id=ADMIN_CHAT_ID, text=full_msg[i:i+4000])
@@ -291,7 +286,6 @@ async def finish_health(uid: int, context: ContextTypes.DEFAULT_TYPE) -> int:
         text="✅ ممنون! گزارش سلامت پتت داره آماده می‌شه.\n🕐 تا ۲۴ ساعت آینده برات ارسال میشه.",
         reply_markup=get_main_menu_keyboard(),
     )
-
     reset_session(uid)
     return MAIN_MENU
 
