@@ -1,10 +1,9 @@
-# flows/health_flow.py
 import logging
 from datetime import datetime
 from telegram import Update
 from telegram.ext import ContextTypes
 
-from core.session import get_session, reset_session
+from core.session import get_session, reset_session, ensure_user_session
 from core.keyboards import (
     build_option_keyboard,
     build_multi_select_keyboard,
@@ -20,14 +19,13 @@ from questions.health_questions import (
     get_next_question_id,
     get_first_question_id,
     should_show_section_transition,
-    QUESTION_FLOW,  # این مهمه
+    QUESTION_FLOW,
 )
 from prompts.health_prompt import generate_health_prompt
 from config import ADMIN_CHAT_ID
 
 logger = logging.getLogger(__name__)
 
-# تابع جدید برای نمایش متن پیشرفت
 def get_progress_text(current_id: int, answers: dict) -> str:
     """محاسبه شماره سؤال فعلی و تعداد کل سوالات و درصد پیشرفت"""
     active_questions = []
@@ -37,13 +35,11 @@ def get_progress_text(current_id: int, answers: dict) -> str:
             active_questions.append(qid)
     
     if current_id in active_questions:
-        current_index = active_questions.index(current_id)  # ایندکس از 0 شروع میشه
+        current_index = active_questions.index(current_id)
         total = len(active_questions)
-        # محاسبه درصد با توجه به شماره سؤال (current_index + 1)
         percent = int(((current_index + 1) / total) * 100)
         return f"📊 سؤال {current_index + 1} از ~{total} ({percent}%)"
     else:
-        # اگر سؤال فعلی در لیست نبود (اشکال)، یه پیام پیش‌فرض برگردون
         return "📊 در حال محاسبه پیشرفت..."
 
 async def start_health_flow(uid: int, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -72,14 +68,12 @@ async def send_question(uid: int, context: ContextTypes.DEFAULT_TYPE) -> int:
 
     answers = session["answers"]
 
-    # نمایش پیام تغییر بخش در صورت نیاز
     transition_msg = should_show_section_transition(
         qid, session.get("prev_question_id"), answers
     )
     if transition_msg:
         await context.bot.send_message(chat_id=uid, text=transition_msg, parse_mode="HTML")
 
-    # استفاده از تابع جدید برای پیشرفت
     progress_text = get_progress_text(qid, answers)
     pet_name = answers.get("pet_name", "پتت")
     q_text = question["text"].replace("{pet_name}", pet_name)
@@ -91,7 +85,7 @@ async def send_question(uid: int, context: ContextTypes.DEFAULT_TYPE) -> int:
     options = get_options_for_question(question, answers)
 
     if q_type == "text_input":
-        if options:  # مثلاً سوال 33 که هم دکمه داره هم ورودی متن
+        if options:
             kb = build_option_keyboard(options)
         else:
             kb = cancel_only_keyboard()
@@ -122,6 +116,7 @@ async def send_question(uid: int, context: ContextTypes.DEFAULT_TYPE) -> int:
         return ANSWERING
 
 async def handle_health_answer(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    await ensure_user_session(update, context)
     uid = update.effective_user.id
     user_text = update.message.text.strip()
 
@@ -141,7 +136,6 @@ async def handle_health_answer(update: Update, context: ContextTypes.DEFAULT_TYP
     q_type = question["type"]
     variable = question["variable"]
 
-    # بررسی حالت waiting_for_other_text
     if session.get("waiting_for_other_text"):
         other_var = session.get("other_text_variable", variable + "_other")
         answers[other_var] = user_text
@@ -150,24 +144,19 @@ async def handle_health_answer(update: Update, context: ContextTypes.DEFAULT_TYP
         await update.message.reply_text(f"✅ ثبت شد: {user_text}")
         return await advance(uid, context)
 
-    # Text input با گزینه (مثل Q33)
     if q_type == "text_input" and question.get("options"):
         value = find_option_value(question["options"], user_text)
         if value:
             answers[variable] = value
             return await advance(uid, context)
-        # اگر دکمه نبود، به عنوان متن آزاد در نظر بگیر
         answers[variable] = user_text
         return await advance(uid, context)
 
-    # Text input ساده
     if q_type == "text_input":
         answers[variable] = user_text
         return await advance(uid, context)
 
-    # Number input
     if q_type == "number_input":
-        # پاکسازی اعداد فارسی
         cleaned = user_text.replace(",", ".").replace("٫", ".").replace("،", ".")
         persian_digits = "۰۱۲۳۴۵۶۷۸۹"
         arabic_digits = "٠١٢٣٤٥٦٧٨٩"
@@ -187,7 +176,6 @@ async def handle_health_answer(update: Update, context: ContextTypes.DEFAULT_TYP
         answers[variable] = num_val
         return await advance(uid, context)
 
-    # Inline button
     if q_type == "inline_button":
         options = get_options_for_question(question, answers)
         value = find_option_value(options, user_text)
@@ -208,6 +196,7 @@ async def handle_health_answer(update: Update, context: ContextTypes.DEFAULT_TYP
     return ANSWERING
 
 async def handle_health_multi_select(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    await ensure_user_session(update, context)
     uid = update.effective_user.id
     user_text = update.message.text.strip()
 
@@ -242,7 +231,6 @@ async def handle_health_multi_select(update: Update, context: ContextTypes.DEFAU
 
         return await advance(uid, context)
 
-    # Toggle option
     value = find_option_value(options, user_text)
     if value is None:
         await update.message.reply_text("⚠️ لطفاً یکی از گزینه‌ها رو انتخاب کن.")
@@ -253,7 +241,6 @@ async def handle_health_multi_select(update: Update, context: ContextTypes.DEFAU
     if value in exclusive:
         session["multi_select_temp"] = [value]
     else:
-        # حذف مقادیر انحصاری
         for ev in exclusive:
             if ev in temp:
                 temp.remove(ev)
@@ -262,7 +249,6 @@ async def handle_health_multi_select(update: Update, context: ContextTypes.DEFAU
         else:
             temp.append(value)
 
-    # بازفرستادن سؤال با کیبورد به‌روز
     progress_text = get_progress_text(qid, answers)
     pet_name = answers.get("pet_name", "پتت")
     q_text = question["text"].replace("{pet_name}", pet_name)
@@ -327,6 +313,7 @@ async def finish_health(uid: int, context: ContextTypes.DEFAULT_TYPE) -> int:
     return MAIN_MENU
 
 async def cancel_health(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    await ensure_user_session(update, context)
     uid = update.effective_user.id
     reset_session(uid)
     await update.message.reply_text(
