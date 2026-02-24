@@ -26,20 +26,32 @@ from config import ADMIN_CHAT_ID
 
 logger = logging.getLogger(__name__)
 
-async def start_health_flow(uid: int, context: ContextTypes.DEFAULT_TYPE) -> int:
-    try:
+async def ensure_health_session(uid: int) -> dict:
+    """اطمینان از اینکه session کاربر برای فلوی سلامت مقداردهی شده است."""
+    session = get_session(uid)
+    if session.get("active_flow") != "health":
+        # کاربر در فلوی سلامت نیست، ریست می‌کنیم و دوباره شروع می‌کنیم
+        reset_session(uid)
         session = get_session(uid)
         session["active_flow"] = "health"
-        first_id = get_first_question_id()
-        if first_id is None:
-            await context.bot.send_message(chat_id=uid, text="❌ خطای سیستمی: اولین سوال یافت نشد!")
-            return MAIN_MENU
-        session["current_question_id"] = first_id
+        session["current_question_id"] = get_first_question_id()
         session["prev_question_id"] = None
         session["answers"] = {}
         session["multi_select_temp"] = []
         session["waiting_for_other_text"] = False
         session["other_text_variable"] = None
+    elif session.get("current_question_id") is None:
+        # در فلوی سلامت است اما سؤال جاری ندارد → اولین سؤال را بگذار
+        session["current_question_id"] = get_first_question_id()
+    return session
+
+async def start_health_flow(uid: int, context: ContextTypes.DEFAULT_TYPE) -> int:
+    try:
+        session = await ensure_health_session(uid)
+        first_id = session["current_question_id"]
+        if first_id is None:
+            await context.bot.send_message(chat_id=uid, text="❌ خطای سیستمی: اولین سوال یافت نشد!")
+            return MAIN_MENU
 
         await context.bot.send_message(
             chat_id=uid,
@@ -53,25 +65,14 @@ async def start_health_flow(uid: int, context: ContextTypes.DEFAULT_TYPE) -> int
 
 async def send_question(uid: int, context: ContextTypes.DEFAULT_TYPE) -> int:
     try:
-        session = get_session(uid)
+        session = await ensure_health_session(uid)
         qid = session.get("current_question_id")
 
-        # اگر qid وجود ندارد ولی کاربر در فلوی سلامت است، دوباره مقداردهی کن
         if qid is None:
-            if session.get("active_flow") == "health":
-                first_id = get_first_question_id()
-                if first_id:
-                    session["current_question_id"] = first_id
-                    qid = first_id
-                    await context.bot.send_message(chat_id=uid, text="🔄 بازیابی خودکار سوال اول...")
-                else:
-                    await context.bot.send_message(chat_id=uid, text="❌ خطای سیستمی: اولین سوال یافت نشد!")
-                    reset_session(uid)
-                    return MAIN_MENU
-            else:
-                await context.bot.send_message(chat_id=uid, text="❌ خطا: شناسه سؤال نامشخص! لطفاً دوباره از منوی اصلی شروع کنید.")
-                reset_session(uid)
-                return MAIN_MENU
+            # در ensure_health_session باید مقداردهی شده باشد، اگر بازم None بود یعنی مشکل جدی
+            await context.bot.send_message(chat_id=uid, text="❌ خطا: شناسه سؤال نامشخص! لطفاً دوباره از منوی اصلی شروع کنید.")
+            reset_session(uid)
+            return MAIN_MENU
 
         question = get_question_by_id(qid)
         if not question:
@@ -137,81 +138,86 @@ async def handle_health_answer(update: Update, context: ContextTypes.DEFAULT_TYP
     if user_text == "❌ انصراف و بازگشت":
         return await cancel_health(update, context)
 
-    session = get_session(uid)
-    qid = session.get("current_question_id")
-    if qid is None:
-        await update.message.reply_text("❌ خطا: اطلاعات جلسه از بین رفته. لطفاً دوباره از منوی اصلی شروع کنید.")
-        reset_session(uid)
-        return MAIN_MENU
+    try:
+        session = await ensure_health_session(uid)
+        qid = session.get("current_question_id")
+        if qid is None:
+            await update.message.reply_text("❌ خطا: اطلاعات جلسه از بین رفته. لطفاً دوباره از منوی اصلی شروع کنید.")
+            reset_session(uid)
+            return MAIN_MENU
 
-    question = get_question_by_id(qid)
-    if not question:
-        await update.message.reply_text(f"❌ خطا: سؤال {qid} یافت نشد!")
-        reset_session(uid)
-        return MAIN_MENU
+        question = get_question_by_id(qid)
+        if not question:
+            await update.message.reply_text(f"❌ خطا: سؤال {qid} یافت نشد!")
+            reset_session(uid)
+            return MAIN_MENU
 
-    answers = session.get("answers", {})
-    q_type = question["type"]
-    variable = question["variable"]
+        answers = session.get("answers", {})
+        q_type = question["type"]
+        variable = question["variable"]
 
-    if session.get("waiting_for_other_text"):
-        other_var = session.get("other_text_variable", variable + "_other")
-        answers[other_var] = user_text
-        session["waiting_for_other_text"] = False
-        session["other_text_variable"] = None
-        await update.message.reply_text(f"✅ ثبت شد: {user_text}")
-        return await advance(uid, context)
+        if session.get("waiting_for_other_text"):
+            other_var = session.get("other_text_variable", variable + "_other")
+            answers[other_var] = user_text
+            session["waiting_for_other_text"] = False
+            session["other_text_variable"] = None
+            await update.message.reply_text(f"✅ ثبت شد: {user_text}")
+            return await advance(uid, context)
 
-    if q_type == "text_input" and question.get("options"):
-        value = find_option_value(question["options"], user_text)
-        if value:
+        if q_type == "text_input" and question.get("options"):
+            value = find_option_value(question["options"], user_text)
+            if value:
+                answers[variable] = value
+                return await advance(uid, context)
+            answers[variable] = user_text
+            return await advance(uid, context)
+
+        if q_type == "text_input":
+            answers[variable] = user_text
+            return await advance(uid, context)
+
+        if q_type == "number_input":
+            cleaned = user_text.replace(",", ".").replace("٫", ".").replace("،", ".")
+            persian_digits = "۰۱۲۳۴۵۶۷۸۹"
+            arabic_digits = "٠١٢٣٤٥٦٧٨٩"
+            for i, (p, a) in enumerate(zip(persian_digits, arabic_digits)):
+                cleaned = cleaned.replace(p, str(i)).replace(a, str(i))
+            try:
+                num_val = float(cleaned)
+            except ValueError:
+                await update.message.reply_text("❌ لطفاً یک عدد معتبر وارد کن.")
+                return ANSWERING
+
+            num_range = question.get("number_range")
+            if num_range:
+                if num_val < num_range["min"] or num_val > num_range["max"]:
+                    await update.message.reply_text(f"❌ عدد باید بین {num_range['min']} و {num_range['max']} باشه.")
+                    return ANSWERING
+            answers[variable] = num_val
+            return await advance(uid, context)
+
+        if q_type == "inline_button":
+            options = get_options_for_question(question, answers)
+            value = find_option_value(options, user_text)
+            if value is None:
+                await update.message.reply_text("⚠️ لطفاً یکی از گزینه‌ها رو انتخاب کن.")
+                return ANSWERING
+
+            if value == "_other" and question.get("has_other_text"):
+                answers[variable] = "_other"
+                session["waiting_for_other_text"] = True
+                session["other_text_variable"] = variable + "_detail"
+                await update.message.reply_text("✏️ لطفاً بنویس:", reply_markup=cancel_only_keyboard())
+                return ANSWERING
+
             answers[variable] = value
             return await advance(uid, context)
-        answers[variable] = user_text
-        return await advance(uid, context)
 
-    if q_type == "text_input":
-        answers[variable] = user_text
-        return await advance(uid, context)
-
-    if q_type == "number_input":
-        cleaned = user_text.replace(",", ".").replace("٫", ".").replace("،", ".")
-        persian_digits = "۰۱۲۳۴۵۶۷۸۹"
-        arabic_digits = "٠١٢٣٤٥٦٧٨٩"
-        for i, (p, a) in enumerate(zip(persian_digits, arabic_digits)):
-            cleaned = cleaned.replace(p, str(i)).replace(a, str(i))
-        try:
-            num_val = float(cleaned)
-        except ValueError:
-            await update.message.reply_text("❌ لطفاً یک عدد معتبر وارد کن.")
-            return ANSWERING
-
-        num_range = question.get("number_range")
-        if num_range:
-            if num_val < num_range["min"] or num_val > num_range["max"]:
-                await update.message.reply_text(f"❌ عدد باید بین {num_range['min']} و {num_range['max']} باشه.")
-                return ANSWERING
-        answers[variable] = num_val
-        return await advance(uid, context)
-
-    if q_type == "inline_button":
-        options = get_options_for_question(question, answers)
-        value = find_option_value(options, user_text)
-        if value is None:
-            await update.message.reply_text("⚠️ لطفاً یکی از گزینه‌ها رو انتخاب کن.")
-            return ANSWERING
-
-        if value == "_other" and question.get("has_other_text"):
-            answers[variable] = "_other"
-            session["waiting_for_other_text"] = True
-            session["other_text_variable"] = variable + "_detail"
-            await update.message.reply_text("✏️ لطفاً بنویس:", reply_markup=cancel_only_keyboard())
-            return ANSWERING
-
-        answers[variable] = value
-        return await advance(uid, context)
-
-    return ANSWERING
+        return ANSWERING
+    except Exception as e:
+        await update.message.reply_text(f"❌ خطای غیرمنتظره: {str(e)}")
+        reset_session(uid)
+        return MAIN_MENU
 
 async def handle_health_multi_select(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     uid = update.effective_user.id
@@ -220,64 +226,69 @@ async def handle_health_multi_select(update: Update, context: ContextTypes.DEFAU
     if user_text == "❌ انصراف و بازگشت":
         return await cancel_health(update, context)
 
-    session = get_session(uid)
-    qid = session.get("current_question_id")
-    question = get_question_by_id(qid)
-    if not question:
-        await update.message.reply_text("❌ خطا: سؤال یافت نشد!")
+    try:
+        session = await ensure_health_session(uid)
+        qid = session.get("current_question_id")
+        question = get_question_by_id(qid)
+        if not question:
+            await update.message.reply_text("❌ خطا: سؤال یافت نشد!")
+            reset_session(uid)
+            return MAIN_MENU
+
+        answers = session.get("answers", {})
+        options = get_options_for_question(question, answers)
+        confirm_text = question.get("confirm_button", "✅ تأیید و ادامه")
+
+        if user_text == confirm_text:
+            final = session.get("multi_select_temp", []) if session.get("multi_select_temp") else ["none"]
+            answers[question["variable"]] = final
+            session["multi_select_temp"] = []
+
+            if final != ["none"]:
+                selected_texts = [opt["text"] for opt in options if opt["value"] in final]
+                if selected_texts:
+                    await update.message.reply_text("✅ انتخاب‌های شما:\n" + "\n".join(f"  • {t}" for t in selected_texts))
+
+            if "_other" in final and question.get("has_other_text"):
+                session["waiting_for_other_text"] = True
+                session["other_text_variable"] = question["variable"] + "_detail"
+                await update.message.reply_text("✏️ لطفاً جزئیات رو بنویس:", reply_markup=cancel_only_keyboard())
+                return ANSWERING
+
+            return await advance(uid, context)
+
+        value = find_option_value(options, user_text)
+        if value is None:
+            await update.message.reply_text("⚠️ لطفاً یکی از گزینه‌ها رو انتخاب کن.")
+            return MULTI_SELECT
+
+        temp = session.get("multi_select_temp", [])
+        exclusive = {"none", "all_normal", "nothing", "healthy", "dont_remember"}
+        if value in exclusive:
+            session["multi_select_temp"] = [value]
+        else:
+            for ev in exclusive:
+                if ev in temp:
+                    temp.remove(ev)
+            if value in temp:
+                temp.remove(value)
+            else:
+                temp.append(value)
+            session["multi_select_temp"] = temp
+
+        progress = calculate_progress(qid, answers)
+        pet_name = answers.get("pet_name", "پتت")
+        q_text = question["text"].replace("{pet_name}", pet_name)
+        text = f"{progress}\n\n{q_text}"
+        if question.get("micro_copy"):
+            text += f"\n\n{question['micro_copy']}"
+        kb = build_multi_select_keyboard(options, session["multi_select_temp"], confirm_text)
+        await update.message.reply_text(text=text, reply_markup=kb, parse_mode="HTML")
+        return MULTI_SELECT
+    except Exception as e:
+        await update.message.reply_text(f"❌ خطای غیرمنتظره: {str(e)}")
         reset_session(uid)
         return MAIN_MENU
-
-    answers = session.get("answers", {})
-    options = get_options_for_question(question, answers)
-    confirm_text = question.get("confirm_button", "✅ تأیید و ادامه")
-
-    if user_text == confirm_text:
-        final = session.get("multi_select_temp", []) if session.get("multi_select_temp") else ["none"]
-        answers[question["variable"]] = final
-        session["multi_select_temp"] = []
-
-        if final != ["none"]:
-            selected_texts = [opt["text"] for opt in options if opt["value"] in final]
-            if selected_texts:
-                await update.message.reply_text("✅ انتخاب‌های شما:\n" + "\n".join(f"  • {t}" for t in selected_texts))
-
-        if "_other" in final and question.get("has_other_text"):
-            session["waiting_for_other_text"] = True
-            session["other_text_variable"] = question["variable"] + "_detail"
-            await update.message.reply_text("✏️ لطفاً جزئیات رو بنویس:", reply_markup=cancel_only_keyboard())
-            return ANSWERING
-
-        return await advance(uid, context)
-
-    value = find_option_value(options, user_text)
-    if value is None:
-        await update.message.reply_text("⚠️ لطفاً یکی از گزینه‌ها رو انتخاب کن.")
-        return MULTI_SELECT
-
-    temp = session.get("multi_select_temp", [])
-    exclusive = {"none", "all_normal", "nothing", "healthy", "dont_remember"}
-    if value in exclusive:
-        session["multi_select_temp"] = [value]
-    else:
-        for ev in exclusive:
-            if ev in temp:
-                temp.remove(ev)
-        if value in temp:
-            temp.remove(value)
-        else:
-            temp.append(value)
-        session["multi_select_temp"] = temp
-
-    progress = calculate_progress(qid, answers)
-    pet_name = answers.get("pet_name", "پتت")
-    q_text = question["text"].replace("{pet_name}", pet_name)
-    text = f"{progress}\n\n{q_text}"
-    if question.get("micro_copy"):
-        text += f"\n\n{question['micro_copy']}"
-    kb = build_multi_select_keyboard(options, session["multi_select_temp"], confirm_text)
-    await update.message.reply_text(text=text, reply_markup=kb, parse_mode="HTML")
-    return MULTI_SELECT
 
 async def advance(uid: int, context: ContextTypes.DEFAULT_TYPE) -> int:
     session = get_session(uid)
