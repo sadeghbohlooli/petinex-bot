@@ -39,4 +39,4 @@ async def admin_reply_handler(update: Update, context: ContextTypes.DEFAULT_TYPE
             await context.bot.send_message(chat_id=chat_id, text=f"📩 پیام از تیم Petinex:\n\n{msg.text}")
             await msg.reply_text(f"✅ پیام به کاربر {chat_id} ارسال شد!")
     except Exception as e:
-        await msg.reply_text(f"❌ خطا: {e}")
+        await msg.reply_text(f"❌ خطا: {e}") 
