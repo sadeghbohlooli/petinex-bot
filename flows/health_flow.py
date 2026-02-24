@@ -69,7 +69,6 @@ async def send_question(uid: int, context: ContextTypes.DEFAULT_TYPE) -> int:
         qid = session.get("current_question_id")
 
         if qid is None:
-            # در ensure_health_session باید مقداردهی شده باشد، اگر بازم None بود یعنی مشکل جدی
             await context.bot.send_message(chat_id=uid, text="❌ خطا: شناسه سؤال نامشخص! لطفاً دوباره از منوی اصلی شروع کنید.")
             reset_session(uid)
             return MAIN_MENU
@@ -291,8 +290,12 @@ async def handle_health_multi_select(update: Update, context: ContextTypes.DEFAU
         return MAIN_MENU
 
 async def advance(uid: int, context: ContextTypes.DEFAULT_TYPE) -> int:
-    session = get_session(uid)
-    current_id = session["current_question_id"]
+    session = await ensure_health_session(uid)
+    current_id = session.get("current_question_id")
+    if current_id is None:
+        # اگر باز هم None بود، ریست می‌کنیم و به منو برمی‌گردیم
+        reset_session(uid)
+        return MAIN_MENU
     answers = session.get("answers", {})
 
     next_id = get_next_question_id(current_id, answers)
@@ -351,3 +354,4 @@ async def cancel_health(update: Update, context: ContextTypes.DEFAULT_TYPE) -> i
         reply_markup=get_main_menu_keyboard(),
     )
     return MAIN_MENU
+    
