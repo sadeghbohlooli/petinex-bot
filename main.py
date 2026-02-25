@@ -1659,32 +1659,45 @@ async def handle_pet_registration(update: Update, context: ContextTypes.DEFAULT_
             data["age_group"],
             data.get("weight")
         )
-        await update_user_level(uid, "silver")
-        await update.message.reply_text(f"✅ پت {data['name']} با موفقیت ثبت شد. سطح شما: نقره")
+        
+        # دریافت سطح فعلی کاربر
+        user = await get_user(uid)
+        current_level = user["level"] if user else "guest"
         
         # پاکسازی session موقت
         session.pop("pet_reg_step", None)
         session.pop("temp_pet_data", None)
         
-        # مرحله طلا
-        text = (
-            "📧 **مرحله ۳ از ۳: تکمیل اطلاعات برای VIP طلایی**\n\n"
-            "ایمیلت رو بده تا گزارش‌های سلامت رو به صورت PDF برات بفرستیم و از تخفیف‌ها و رویدادهای ویژه با خبر بشی.\n"
-            "شهر و منطقه‌ات رو هم بگو تا بهترین خدمات نزدیک خونه‌ت رو بهت معرفی کنیم.\n"
-            "با تکمیل این اطلاعات، عضو **VIP طلایی** میشی و به همه خدمات ویژه دسترسی پیدا می‌کنی!"
-        )
-        await update.message.reply_text(
-            text,
-            reply_markup=ReplyKeyboardMarkup([
-                [KeyboardButton("📧 وارد کردن ایمیل")],
-                ["❌ بعداً"]
-            ], resize_keyboard=True),
-            parse_mode="Markdown"
-        )
-        return REG_GOLD
+        # اگر کاربر قبلاً طلایی نبوده، به مرحله طلا برو
+        if current_level != "gold":
+            # اگر کاربر برنز بوده، او را نقره کن
+            if current_level == "bronze":
+                await update_user_level(uid, "silver")
+            await update.message.reply_text(f"✅ پت {data['name']} با موفقیت ثبت شد.")
+            
+            # نمایش مرحله طلا
+            text = (
+                "📧 **مرحله ۳ از ۳: تکمیل اطلاعات برای VIP طلایی**\n\n"
+                "ایمیلت رو بده تا گزارش‌های سلامت رو به صورت PDF برات بفرستیم و از تخفیف‌ها و رویدادهای ویژه با خبر بشی.\n"
+                "شهر و منطقه‌ات رو هم بگو تا بهترین خدمات نزدیک خونه‌ت رو بهت معرفی کنیم.\n"
+                "با تکمیل این اطلاعات، عضو **VIP طلایی** میشی و به همه خدمات ویژه دسترسی پیدا می‌کنی!"
+            )
+            await update.message.reply_text(
+                text,
+                reply_markup=ReplyKeyboardMarkup([
+                    [KeyboardButton("📧 وارد کردن ایمیل")],
+                    ["❌ بعداً"]
+                ], resize_keyboard=True),
+                parse_mode="Markdown"
+            )
+            return REG_GOLD
+        else:
+            # کاربر قبلاً طلایی بوده، فقط پیام موفقیت بده و به منو برگرد
+            await update.message.reply_text(f"✅ پت {data['name']} با موفقیت ثبت شد.")
+            return await show_main_menu(update, context)
     
     return REG_SILVER_QUESTIONS
-
+    
 async def skip_gold(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     await update.message.reply_text("باشه! هر وقت خواستی می‌تونی از منوی اصلی گزینه «وضعیت عضویت» رو بزنی و اطلاعاتت رو کامل کنی.")
     return await show_main_menu(update, context)
