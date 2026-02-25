@@ -1524,122 +1524,166 @@ async def start_add_pet(update: Update, context: ContextTypes.DEFAULT_TYPE) -> i
     """شروع ثبت پت جدید"""
     session = get_session(update.effective_user.id)
     session["temp_pet_data"] = {}
+    session["pet_reg_step"] = "name"
     await update.message.reply_text("✏️ اسم پت قشنگت چیه؟", reply_markup=cancel_only_keyboard())
     return REG_SILVER_QUESTIONS
 
-async def handle_pet_name(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    session = get_session(update.effective_user.id)
-    session["temp_pet_data"]["name"] = update.message.text.strip()
-    await update.message.reply_text("🐾 سگه یا گربه؟", reply_markup=build_option_keyboard([
-        {"text": "🐶 سگ", "value": "dog"},
-        {"text": "🐱 گربه", "value": "cat"},
-    ]))
-    return REG_SILVER_QUESTIONS
-
-async def handle_pet_type(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    session = get_session(update.effective_user.id)
-    pet_type = find_option_value([
-        {"text": "🐶 سگ", "value": "dog"},
-        {"text": "🐱 گربه", "value": "cat"},
-    ], update.message.text)
-    if not pet_type:
-        await update.message.reply_text("لطفاً یکی از گزینه‌ها رو انتخاب کن.")
-        return REG_SILVER_QUESTIONS
-    session["temp_pet_data"]["type"] = pet_type
-    # نژاد بر اساس نوع
-    if pet_type == "dog":
-        options = [
-            {"text": "ژرمن", "value": "german"},
-            {"text": "گلدن", "value": "golden"},
-            {"text": "پودل", "value": "poodle"},
-            {"text": "مخلوط", "value": "mixed"},
-            {"text": "سایر", "value": "other"},
-        ]
-    else:
-        options = [
-            {"text": "پرشین", "value": "persian"},
-            {"text": "اسکاتیش", "value": "scottish"},
-            {"text": "بریتیش", "value": "british"},
-            {"text": "مخلوط", "value": "mixed"},
-            {"text": "سایر", "value": "other"},
-        ]
-    await update.message.reply_text("🧬 نژادش چیه؟", reply_markup=build_option_keyboard(options))
-    return REG_SILVER_QUESTIONS
-
-async def handle_pet_breed(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    session = get_session(update.effective_user.id)
-    pet_type = session["temp_pet_data"]["type"]
-    # تعیین لیست نژاد
-    if pet_type == "dog":
-        options = [
-            {"text": "ژرمن", "value": "german"},
-            {"text": "گلدن", "value": "golden"},
-            {"text": "پودل", "value": "poodle"},
-            {"text": "مخلوط", "value": "mixed"},
-            {"text": "سایر", "value": "other"},
-        ]
-    else:
-        options = [
-            {"text": "پرشین", "value": "persian"},
-            {"text": "اسکاتیش", "value": "scottish"},
-            {"text": "بریتیش", "value": "british"},
-            {"text": "مخلوط", "value": "mixed"},
-            {"text": "سایر", "value": "other"},
-        ]
-    breed = find_option_value(options, update.message.text)
-    if not breed:
-        await update.message.reply_text("لطفاً یکی از گزینه‌ها رو انتخاب کن.")
-        return REG_SILVER_QUESTIONS
-    session["temp_pet_data"]["breed"] = breed
-    await update.message.reply_text("📅 گروه سنی:", reply_markup=build_option_keyboard([
-        {"text": "🐣 زیر ۱ سال", "value": "baby"},
-        {"text": "🐕 ۱-۳ سال", "value": "young"},
-        {"text": "🐕‍🦺 ۳-۷ سال", "value": "adult"},
-        {"text": "🦮 بالای ۷ سال", "value": "senior"},
-    ]))
-    return REG_SILVER_QUESTIONS
-
-async def handle_pet_age(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    session = get_session(update.effective_user.id)
-    age_val = find_option_value([
-        {"text": "🐣 زیر ۱ سال", "value": "baby"},
-        {"text": "🐕 ۱-۳ سال", "value": "young"},
-        {"text": "🐕‍🦺 ۳-۷ سال", "value": "adult"},
-        {"text": "🦮 بالای ۷ سال", "value": "senior"},
-    ], update.message.text)
-    if not age_val:
-        await update.message.reply_text("لطفاً یکی از گزینه‌ها رو انتخاب کن.")
-        return REG_SILVER_QUESTIONS
-    session["temp_pet_data"]["age_group"] = age_val
-    await update.message.reply_text("⚖️ وزن حدودی (کیلوگرم) - اگه نمی‌دونی یه چیزی بنویس:", reply_markup=cancel_only_keyboard())
-    return REG_SILVER_QUESTIONS
-
-async def handle_pet_weight(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    session = get_session(update.effective_user.id)
-    try:
-        weight = float(update.message.text.replace(",", "."))
-    except:
-        weight = None
-    session["temp_pet_data"]["weight"] = weight
+async def handle_pet_registration(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     uid = update.effective_user.id
-    # ذخیره در دیتابیس
-    data = session["temp_pet_data"]
-    pet_id = await add_pet(uid, data["name"], data["type"], data["breed"], data["age_group"], data.get("weight"))
-    await update_user_level(uid, "silver")
-    await update.message.reply_text(f"✅ پت {data['name']} با موفقیت ثبت شد. سطح شما: نقره")
+    user_text = update.message.text.strip()
     
-    # مرحله طلا: ایمیل و شهر
-    text = (
-        "📧 **مرحله ۳ از ۳: تکمیل اطلاعات برای VIP طلایی**\n\n"
-        "ایمیلت رو بده تا گزارش‌های سلامت رو به صورت PDF برات بفرستیم و از تخفیف‌ها و رویدادهای ویژه با خبر بشی.\n"
-        "شهر و منطقه‌ات رو هم بگو تا بهترین خدمات نزدیک خونه‌ت رو بهت معرفی کنیم.\n"
-        "با تکمیل این اطلاعات، عضو **VIP طلایی** میشی و به همه خدمات ویژه دسترسی پیدا می‌کنی!"
-    )
-    await update.message.reply_text(text, reply_markup=ReplyKeyboardMarkup([
-        [KeyboardButton("📧 وارد کردن ایمیل")],
-        ["❌ بعداً"]
-    ], resize_keyboard=True), parse_mode="Markdown")
-    return REG_GOLD
+    if user_text == "❌ انصراف و بازگشت":
+        reset_session(uid)
+        return await show_main_menu(update, context)
+    
+    session = get_session(uid)
+    step = session.get("pet_reg_step", "name")
+    
+    if step == "name":
+        session["temp_pet_data"] = {"name": user_text}
+        session["pet_reg_step"] = "type"
+        await update.message.reply_text(
+            "🐾 سگه یا گربه؟",
+            reply_markup=build_option_keyboard([
+                {"text": "🐶 سگ", "value": "dog"},
+                {"text": "🐱 گربه", "value": "cat"},
+            ])
+        )
+        return REG_SILVER_QUESTIONS
+    
+    elif step == "type":
+        pet_type = find_option_value([
+            {"text": "🐶 سگ", "value": "dog"},
+            {"text": "🐱 گربه", "value": "cat"},
+        ], user_text)
+        if not pet_type:
+            await update.message.reply_text("❌ لطفاً یکی از گزینه‌ها را انتخاب کنید.")
+            return REG_SILVER_QUESTIONS
+        
+        session["temp_pet_data"]["type"] = pet_type
+        session["pet_reg_step"] = "breed"
+        
+        # تعیین گزینه‌های نژاد بر اساس نوع
+        if pet_type == "dog":
+            options = [
+                {"text": "ژرمن", "value": "german"},
+                {"text": "گلدن", "value": "golden"},
+                {"text": "پودل", "value": "poodle"},
+                {"text": "مخلوط", "value": "mixed"},
+                {"text": "سایر", "value": "other"},
+            ]
+        else:
+            options = [
+                {"text": "پرشین", "value": "persian"},
+                {"text": "اسکاتیش", "value": "scottish"},
+                {"text": "بریتیش", "value": "british"},
+                {"text": "مخلوط", "value": "mixed"},
+                {"text": "سایر", "value": "other"},
+            ]
+        await update.message.reply_text(
+            "🧬 نژادش چیه؟",
+            reply_markup=build_option_keyboard(options)
+        )
+        return REG_SILVER_QUESTIONS
+    
+    elif step == "breed":
+        pet_type = session["temp_pet_data"]["type"]
+        if pet_type == "dog":
+            options = [
+                {"text": "ژرمن", "value": "german"},
+                {"text": "گلدن", "value": "golden"},
+                {"text": "پودل", "value": "poodle"},
+                {"text": "مخلوط", "value": "mixed"},
+                {"text": "سایر", "value": "other"},
+            ]
+        else:
+            options = [
+                {"text": "پرشین", "value": "persian"},
+                {"text": "اسکاتیش", "value": "scottish"},
+                {"text": "بریتیش", "value": "british"},
+                {"text": "مخلوط", "value": "mixed"},
+                {"text": "سایر", "value": "other"},
+            ]
+        breed = find_option_value(options, user_text)
+        if not breed:
+            await update.message.reply_text("❌ لطفاً یکی از گزینه‌ها را انتخاب کنید.")
+            return REG_SILVER_QUESTIONS
+        
+        session["temp_pet_data"]["breed"] = breed
+        session["pet_reg_step"] = "age"
+        await update.message.reply_text(
+            "📅 گروه سنی:",
+            reply_markup=build_option_keyboard([
+                {"text": "🐣 زیر ۱ سال", "value": "baby"},
+                {"text": "🐕 ۱-۳ سال", "value": "young"},
+                {"text": "🐕‍🦺 ۳-۷ سال", "value": "adult"},
+                {"text": "🦮 بالای ۷ سال", "value": "senior"},
+            ])
+        )
+        return REG_SILVER_QUESTIONS
+    
+    elif step == "age":
+        age = find_option_value([
+            {"text": "🐣 زیر ۱ سال", "value": "baby"},
+            {"text": "🐕 ۱-۳ سال", "value": "young"},
+            {"text": "🐕‍🦺 ۳-۷ سال", "value": "adult"},
+            {"text": "🦮 بالای ۷ سال", "value": "senior"},
+        ], user_text)
+        if not age:
+            await update.message.reply_text("❌ لطفاً یکی از گزینه‌ها را انتخاب کنید.")
+            return REG_SILVER_QUESTIONS
+        
+        session["temp_pet_data"]["age_group"] = age
+        session["pet_reg_step"] = "weight"
+        await update.message.reply_text(
+            "⚖️ وزن حدودی (کیلوگرم) - اگه نمی‌دونی یه چیزی بنویس:",
+            reply_markup=cancel_only_keyboard()
+        )
+        return REG_SILVER_QUESTIONS
+    
+    elif step == "weight":
+        try:
+            weight = float(user_text.replace(",", "."))
+        except ValueError:
+            weight = None
+        
+        data = session["temp_pet_data"]
+        data["weight"] = weight
+        
+        # ذخیره در دیتابیس
+        await add_pet(
+            uid,
+            data["name"],
+            data["type"],
+            data["breed"],
+            data["age_group"],
+            data.get("weight")
+        )
+        await update_user_level(uid, "silver")
+        await update.message.reply_text(f"✅ پت {data['name']} با موفقیت ثبت شد. سطح شما: نقره")
+        
+        # پاکسازی session موقت
+        session.pop("pet_reg_step", None)
+        session.pop("temp_pet_data", None)
+        
+        # مرحله طلا
+        text = (
+            "📧 **مرحله ۳ از ۳: تکمیل اطلاعات برای VIP طلایی**\n\n"
+            "ایمیلت رو بده تا گزارش‌های سلامت رو به صورت PDF برات بفرستیم و از تخفیف‌ها و رویدادهای ویژه با خبر بشی.\n"
+            "شهر و منطقه‌ات رو هم بگو تا بهترین خدمات نزدیک خونه‌ت رو بهت معرفی کنیم.\n"
+            "با تکمیل این اطلاعات، عضو **VIP طلایی** میشی و به همه خدمات ویژه دسترسی پیدا می‌کنی!"
+        )
+        await update.message.reply_text(
+            text,
+            reply_markup=ReplyKeyboardMarkup([
+                [KeyboardButton("📧 وارد کردن ایمیل")],
+                ["❌ بعداً"]
+            ], resize_keyboard=True),
+            parse_mode="Markdown"
+        )
+        return REG_GOLD
+    
+    return REG_SILVER_QUESTIONS
 
 async def skip_gold(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     await update.message.reply_text("باشه! هر وقت خواستی می‌تونی از منوی اصلی گزینه «وضعیت عضویت» رو بزنی و اطلاعاتت رو کامل کنی.")
@@ -2218,12 +2262,8 @@ def main():
                 MessageHandler(filters.Text("➕ ثبت پت جدید"), start_add_pet),
                 MessageHandler(filters.Text("❌ بعداً"), skip_silver),
             ],
-            REG_SILVER_QUESTIONS: [
-                MessageHandler(filters.TEXT & ~filters.COMMAND, handle_pet_name),
-                MessageHandler(filters.TEXT & ~filters.COMMAND, handle_pet_type),
-                MessageHandler(filters.TEXT & ~filters.COMMAND, handle_pet_breed),
-                MessageHandler(filters.TEXT & ~filters.COMMAND, handle_pet_age),
-                MessageHandler(filters.TEXT & ~filters.COMMAND, handle_pet_weight),
+                        REG_SILVER_QUESTIONS: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND, handle_pet_registration),
             ],
             REG_GOLD: [
                 MessageHandler(filters.Text("📧 وارد کردن ایمیل"), start_gold),
