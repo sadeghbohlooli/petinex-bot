@@ -42,57 +42,63 @@ VIP_HEALTH_ANSWERING = 31
 VIP_HEALTH_MULTI = 32
 
 # ==================== دیتابیس ====================
+import sqlite3
+import aiosqlite
+import json
+
 DB_PATH = "petinex.db"
 
-async def init_db():
-    """ایجاد جداول اگر وجود نداشته باشند"""
-    async with aiosqlite.connect(DB_PATH) as db:
-        # جدول کاربران
-        await db.execute("""
-            CREATE TABLE IF NOT EXISTS users (
-                user_id INTEGER PRIMARY KEY,
-                username TEXT,
-                first_name TEXT,
-                last_name TEXT,
-                phone TEXT,
-                email TEXT,
-                city TEXT,
-                district TEXT,
-                level TEXT DEFAULT 'guest',
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                is_first_100 BOOLEAN DEFAULT 0
-            )
-        """)
-        # جدول پت‌ها
-        await db.execute("""
-            CREATE TABLE IF NOT EXISTS pets (
-                pet_id INTEGER PRIMARY KEY AUTOINCREMENT,
-                user_id INTEGER,
-                name TEXT,
-                type TEXT,
-                breed TEXT,
-                age_group TEXT,
-                weight REAL,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                FOREIGN KEY(user_id) REFERENCES users(user_id)
-            )
-        """)
-        # جدول گزارش‌های سلامت
-        await db.execute("""
-            CREATE TABLE IF NOT EXISTS health_reports (
-                report_id INTEGER PRIMARY KEY AUTOINCREMENT,
-                user_id INTEGER,
-                pet_id INTEGER,
-                report_type TEXT,  -- 'basic' یا 'vip'
-                answers TEXT,       -- JSON
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                FOREIGN KEY(user_id) REFERENCES users(user_id),
-                FOREIGN KEY(pet_id) REFERENCES pets(pet_id)
-            )
-        """)
-        await db.commit()
+def init_db():
+    """ایجاد جداول اگر وجود نداشته باشند (همزمان - فقط برای راه‌اندازی اولیه)"""
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    # جدول کاربران
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS users (
+            user_id INTEGER PRIMARY KEY,
+            username TEXT,
+            first_name TEXT,
+            last_name TEXT,
+            phone TEXT,
+            email TEXT,
+            city TEXT,
+            district TEXT,
+            level TEXT DEFAULT 'guest',
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            is_first_100 BOOLEAN DEFAULT 0
+        )
+    """)
+    # جدول پت‌ها
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS pets (
+            pet_id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER,
+            name TEXT,
+            type TEXT,
+            breed TEXT,
+            age_group TEXT,
+            weight REAL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY(user_id) REFERENCES users(user_id)
+        )
+    """)
+    # جدول گزارش‌های سلامت
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS health_reports (
+            report_id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER,
+            pet_id INTEGER,
+            report_type TEXT,
+            answers TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY(user_id) REFERENCES users(user_id),
+            FOREIGN KEY(pet_id) REFERENCES pets(pet_id)
+        )
+    """)
+    conn.commit()
+    conn.close()
 
-# توابع کمکی دیتابیس
+# توابع کمکی دیتابیس (با aiosqlite برای استفاده در حین کار)
 async def get_user(user_id: int):
     async with aiosqlite.connect(DB_PATH) as db:
         db.row_factory = aiosqlite.Row
@@ -138,7 +144,6 @@ async def get_user_pets(user_id: int):
         return await cursor.fetchall()
 
 async def count_users_before(user_id: int) -> int:
-    """تعداد کاربرانی که قبل از این کاربر ثبت نام کرده‌اند (برای شرط ۱۰۰ نفر اول)"""
     async with aiosqlite.connect(DB_PATH) as db:
         cursor = await db.execute(
             "SELECT COUNT(*) FROM users WHERE created_at < (SELECT created_at FROM users WHERE user_id = ?)",
@@ -159,6 +164,7 @@ async def save_health_report(user_id: int, pet_id: int, report_type: str, answer
             VALUES (?, ?, ?, ?)
         """, (user_id, pet_id, report_type, json.dumps(answers, ensure_ascii=False)))
         await db.commit()
+        
         # ==================== core/session.py ====================
 user_sessions = {}
 
@@ -2188,9 +2194,8 @@ def main():
         print("❌ BOT_TOKEN or ADMIN_CHAT_ID not set!")
         return
 
-    # راه‌اندازی دیتابیس
-    import asyncio
-    asyncio.run(init_db())
+    # راه‌اندازی دیتابیس (همزمان)
+    init_db()
 
     app = Application.builder().token(BOT_TOKEN).post_init(post_init).build()
 
