@@ -1690,32 +1690,63 @@ async def skip_gold(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     return await show_main_menu(update, context)
 
 async def start_gold(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    uid = update.effective_user.id
+    session = get_session(uid)
+    session["gold_step"] = "email"
+    session["gold_data"] = {}
     await update.message.reply_text("✉️ لطفاً ایمیل خود را وارد کنید:", reply_markup=cancel_only_keyboard())
     return REG_GOLD
 
-async def handle_email(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    email = update.message.text.strip()
-    if "@" not in email or "." not in email:
-        await update.message.reply_text("ایمیل معتبر نیست. لطفاً دوباره وارد کنید.")
-        return REG_GOLD
-    context.user_data["temp_email"] = email
-    await update.message.reply_text("🏙️ شهر خود را وارد کنید:", reply_markup=cancel_only_keyboard())
-    return REG_GOLD
-
-async def handle_city(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    city = update.message.text.strip()
-    context.user_data["temp_city"] = city
-    await update.message.reply_text("📍 منطقه یا محله (اختیاری):", reply_markup=cancel_only_keyboard())
-    return REG_GOLD
-
-async def handle_district(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    district = update.message.text.strip()
+async def handle_gold_registration(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     uid = update.effective_user.id
-    email = context.user_data.get("temp_email", "")
-    city = context.user_data.get("temp_city", "")
-    await update_user_email_city(uid, email, city, district)
-    await update_user_level(uid, "gold")
-    await update.message.reply_text("🎉 تبریک! شما عضو VIP طلایی پتینکس شدید. به همه خدمات دسترسی دارید!")
+    user_text = update.message.text.strip()
+    session = get_session(uid)
+    step = session.get("gold_step")
+    
+    if not step:
+        return await show_main_menu(update, context)
+
+    if user_text == "❌ انصراف و بازگشت" or user_text == "❌ بعداً":
+        session.pop("gold_step", None)
+        session.pop("gold_data", None)
+        await update.message.reply_text("❌ عملیات لغو شد.")
+        return await show_main_menu(update, context)
+
+    if step == "email":
+        if "@" not in user_text or "." not in user_text:
+            await update.message.reply_text("❌ ایمیل معتبر نیست. لطفاً دوباره وارد کنید.")
+            return REG_GOLD
+        session["gold_data"]["email"] = user_text
+        session["gold_step"] = "city"
+        await update.message.reply_text("🏙️ شهر خود را وارد کنید:", reply_markup=cancel_only_keyboard())
+        return REG_GOLD
+
+    elif step == "city":
+        session["gold_data"]["city"] = user_text
+        session["gold_step"] = "district"
+        await update.message.reply_text("📍 منطقه یا محله (اختیاری):", reply_markup=cancel_only_keyboard())
+        return REG_GOLD
+
+    elif step == "district":
+        data = session["gold_data"]
+        email = data.get("email", "")
+        city = data.get("city", "")
+        district = user_text if user_text != "❌ انصراف و بازگشت" else ""
+        await update_user_email_city(uid, email, city, district)
+        await update_user_level(uid, "gold")
+        session.pop("gold_step", None)
+        session.pop("gold_data", None)
+        await update.message.reply_text("🎉 تبریک! شما عضو VIP طلایی پتینکس شدید. به همه خدمات دسترسی دارید!")
+        return await show_main_menu(update, context)
+
+    return REG_GOLD
+
+async def skip_gold(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    uid = update.effective_user.id
+    session = get_session(uid)
+    session.pop("gold_step", None)
+    session.pop("gold_data", None)
+    await update.message.reply_text("باشه! هر وقت خواستی می‌تونی از منوی اصلی گزینه «وضعیت عضویت» رو بزنی و اطلاعاتت رو کامل کنی.")
     return await show_main_menu(update, context)
 
 # ==================== گزارش سلامت پایه ====================
@@ -2268,9 +2299,7 @@ def main():
             REG_GOLD: [
                 MessageHandler(filters.Text("📧 وارد کردن ایمیل"), start_gold),
                 MessageHandler(filters.Text("❌ بعداً"), skip_gold),
-                MessageHandler(filters.TEXT & ~filters.COMMAND, handle_email),
-                MessageHandler(filters.TEXT & ~filters.COMMAND, handle_city),
-                MessageHandler(filters.TEXT & ~filters.COMMAND, handle_district),
+                MessageHandler(filters.TEXT & ~filters.COMMAND, handle_gold_registration),
             ],
             MAIN_MENU: [
                 MessageHandler(filters.TEXT & ~filters.COMMAND, handle_main_menu),
