@@ -164,8 +164,8 @@ async def save_health_report(user_id: int, pet_id: int, report_type: str, answer
             VALUES (?, ?, ?, ?)
         """, (user_id, pet_id, report_type, json.dumps(answers, ensure_ascii=False)))
         await db.commit()
-        
-        # ==================== core/session.py ====================
+
+# ==================== core/session.py ====================
 user_sessions = {}
 
 def get_session(uid: int) -> dict:
@@ -1675,6 +1675,10 @@ async def handle_pet_registration(update: Update, context: ContextTypes.DEFAULT_
                 await update_user_level(uid, "silver")
             await update.message.reply_text(f"✅ پت {data['name']} با موفقیت ثبت شد.")
             
+            # تنظیم مرحله طلا
+            session["gold_step"] = "email"
+            session["gold_data"] = {}
+            
             # نمایش مرحله طلا
             text = (
                 "📧 **مرحله ۳ از ۳: تکمیل اطلاعات برای VIP طلایی**\n\n"
@@ -1697,7 +1701,7 @@ async def handle_pet_registration(update: Update, context: ContextTypes.DEFAULT_
             return await show_main_menu(update, context)
     
     return REG_SILVER_QUESTIONS
-    
+
 async def skip_gold(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     await update.message.reply_text("باشه! هر وقت خواستی می‌تونی از منوی اصلی گزینه «وضعیت عضویت» رو بزنی و اطلاعاتت رو کامل کنی.")
     return await show_main_menu(update, context)
@@ -1753,14 +1757,6 @@ async def handle_gold_registration(update: Update, context: ContextTypes.DEFAULT
         return await show_main_menu(update, context)
 
     return REG_GOLD
-
-async def skip_gold(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    uid = update.effective_user.id
-    session = get_session(uid)
-    session.pop("gold_step", None)
-    session.pop("gold_data", None)
-    await update.message.reply_text("باشه! هر وقت خواستی می‌تونی از منوی اصلی گزینه «وضعیت عضویت» رو بزنی و اطلاعاتت رو کامل کنی.")
-    return await show_main_menu(update, context)
 
 # ==================== گزارش سلامت پایه ====================
 async def start_basic_health(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -2306,7 +2302,7 @@ def main():
                 MessageHandler(filters.Text("➕ ثبت پت جدید"), start_add_pet),
                 MessageHandler(filters.Text("❌ بعداً"), skip_silver),
             ],
-                        REG_SILVER_QUESTIONS: [
+            REG_SILVER_QUESTIONS: [
                 MessageHandler(filters.TEXT & ~filters.COMMAND, handle_pet_registration),
             ],
             REG_GOLD: [
