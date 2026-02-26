@@ -2,8 +2,6 @@
 # -*- coding: utf-8 -*-
 
 import logging
-import sqlite3
-import aiosqlite
 import json
 from datetime import datetime
 from telegram import Update, BotCommand, ReplyKeyboardMarkup, KeyboardButton, ReplyKeyboardRemove
