@@ -45,6 +45,9 @@ import psycopg2.extras
 import os
 import json
 
+# تنظیم لاگر
+logger = logging.getLogger(__name__)
+
 def get_db_connection():
     """یک اتصال جدید به دیتابیس PostgreSQL برمی‌گرداند"""
     DATABASE_URL = os.environ.get('DATABASE_URL')
@@ -113,18 +116,24 @@ def init_db():
 
 # توابع کمکی دیتابیس
 async def get_user(user_id: int):
-    conn = get_db_connection()
+    conn = None
     try:
+        conn = get_db_connection()
         cur = conn.cursor(cursor_factory=psycopg2.extras.DictRow)
         cur.execute("SELECT * FROM users WHERE user_id = %s", (user_id,))
         row = cur.fetchone()
         return dict(row) if row else None
+    except Exception as e:
+        logger.exception(f"خطا در get_user برای user_id {user_id}: {e}")
+        return None
     finally:
-        conn.close()
+        if conn:
+            conn.close()
 
 async def create_user(user_id: int, username: str, first_name: str, last_name: str = ""):
-    conn = get_db_connection()
+    conn = None
     try:
+        conn = get_db_connection()
         cur = conn.cursor()
         cur.execute("""
             INSERT INTO users (user_id, username, first_name, last_name, level)
@@ -132,40 +141,56 @@ async def create_user(user_id: int, username: str, first_name: str, last_name: s
             ON CONFLICT (user_id) DO NOTHING
         """, (user_id, username, first_name, last_name))
         conn.commit()
+    except Exception as e:
+        logger.exception(f"خطا در create_user برای user_id {user_id}: {e}")
     finally:
-        conn.close()
+        if conn:
+            conn.close()
 
 async def update_user_level(user_id: int, level: str):
-    conn = get_db_connection()
+    conn = None
     try:
+        conn = get_db_connection()
         cur = conn.cursor()
         cur.execute("UPDATE users SET level = %s WHERE user_id = %s", (level, user_id))
         conn.commit()
+    except Exception as e:
+        logger.exception(f"خطا در update_user_level برای user_id {user_id}: {e}")
     finally:
-        conn.close()
+        if conn:
+            conn.close()
 
 async def update_user_phone(user_id: int, phone: str):
-    conn = get_db_connection()
+    conn = None
     try:
+        conn = get_db_connection()
         cur = conn.cursor()
         cur.execute("UPDATE users SET phone = %s WHERE user_id = %s", (phone, user_id))
         conn.commit()
+    except Exception as e:
+        logger.exception(f"خطا در update_user_phone برای user_id {user_id}: {e}")
     finally:
-        conn.close()
+        if conn:
+            conn.close()
 
 async def update_user_email_city(user_id: int, email: str, city: str, district: str = ""):
-    conn = get_db_connection()
+    conn = None
     try:
+        conn = get_db_connection()
         cur = conn.cursor()
         cur.execute("UPDATE users SET email = %s, city = %s, district = %s WHERE user_id = %s", 
                     (email, city, district, user_id))
         conn.commit()
+    except Exception as e:
+        logger.exception(f"خطا در update_user_email_city برای user_id {user_id}: {e}")
     finally:
-        conn.close()
+        if conn:
+            conn.close()
 
 async def add_pet(user_id: int, name: str, pet_type: str, breed: str, age_group: str, weight: float = None):
-    conn = get_db_connection()
+    conn = None
     try:
+        conn = get_db_connection()
         cur = conn.cursor()
         cur.execute("""
             INSERT INTO pets (user_id, name, type, breed, age_group, weight)
@@ -175,22 +200,32 @@ async def add_pet(user_id: int, name: str, pet_type: str, breed: str, age_group:
         pet_id = cur.fetchone()[0]
         conn.commit()
         return pet_id
+    except Exception as e:
+        logger.exception(f"خطا در add_pet برای user_id {user_id}: {e}")
+        return None
     finally:
-        conn.close()
+        if conn:
+            conn.close()
 
 async def get_user_pets(user_id: int):
-    conn = get_db_connection()
+    conn = None
     try:
+        conn = get_db_connection()
         cur = conn.cursor(cursor_factory=psycopg2.extras.DictRow)
         cur.execute("SELECT * FROM pets WHERE user_id = %s ORDER BY created_at", (user_id,))
         rows = cur.fetchall()
         return [dict(row) for row in rows]
+    except Exception as e:
+        logger.exception(f"خطا در get_user_pets برای user_id {user_id}: {e}")
+        return []
     finally:
-        conn.close()
+        if conn:
+            conn.close()
 
 async def count_users_before(user_id: int) -> int:
-    conn = get_db_connection()
+    conn = None
     try:
+        conn = get_db_connection()
         cur = conn.cursor()
         cur.execute("""
             SELECT COUNT(*) FROM users 
@@ -198,29 +233,41 @@ async def count_users_before(user_id: int) -> int:
         """, (user_id,))
         count = cur.fetchone()[0]
         return count
+    except Exception as e:
+        logger.exception(f"خطا در count_users_before برای user_id {user_id}: {e}")
+        return 0
     finally:
-        conn.close()
+        if conn:
+            conn.close()
 
 async def mark_first_100(user_id: int):
-    conn = get_db_connection()
+    conn = None
     try:
+        conn = get_db_connection()
         cur = conn.cursor()
         cur.execute("UPDATE users SET is_first_100 = TRUE WHERE user_id = %s", (user_id,))
         conn.commit()
+    except Exception as e:
+        logger.exception(f"خطا در mark_first_100 برای user_id {user_id}: {e}")
     finally:
-        conn.close()
+        if conn:
+            conn.close()
 
 async def save_health_report(user_id: int, pet_id: int, report_type: str, answers: dict):
-    conn = get_db_connection()
+    conn = None
     try:
+        conn = get_db_connection()
         cur = conn.cursor()
         cur.execute("""
             INSERT INTO health_reports (user_id, pet_id, report_type, answers)
             VALUES (%s, %s, %s, %s)
         """, (user_id, pet_id, report_type, json.dumps(answers, ensure_ascii=False)))
         conn.commit()
+    except Exception as e:
+        logger.exception(f"خطا در save_health_report برای user_id {user_id}: {e}")
     finally:
-        conn.close()
+        if conn:
+            conn.close()
 
 # ==================== core/session.py ====================
 user_sessions = {}
@@ -1472,856 +1519,970 @@ async def show_main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE, tex
 
 # ==================== start ====================
 async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    uid = update.effective_user.id
-    user_data = update.effective_user
-    await create_user(uid, user_data.username or "", user_data.first_name or "", user_data.last_name or "")
-    
-    # پیام اول
-    await update.message.reply_text(
-        "🐾 **سلام دوست من! به پتینکس خوش اومدی** 🧡\n\n"
-        "ما اینجاییم که مراقبت از همدم خونگیت رو **آسون‌تر، دقیق‌تر و حرفه‌ای‌تر** کنیم.\n\n"
-        "🩺 گزارش سلامت هوشمند | 🥗 رژیم غذایی اختصاصی\n"
-        "👨‍⚕️ مشاوره دامپزشکی | 🛒 پت‌شاپ، داروخانه، گرومر و …",
-        parse_mode="Markdown"
-    )
-    
-    # پیام دوم با دکمه
-    await update.message.reply_text(
-        "✨ یه چیز مهم:\n"
-        "تو الان جزو **۵۰ سرپرست اولی** هستی که پتینکس رو انتخاب کردی.\n"
-        "ما این حمایتت رو فراموش نمیکنیم! 💛",
-        parse_mode="Markdown"
-    )
-    
-    await update.message.reply_text(
-        "🚀 برای ساختن یه زندگی جذاب‌تر و راحت‌تر برای پتت آماده‌ای؟",
-        reply_markup=ReplyKeyboardMarkup([[KeyboardButton("🚀 بزن بریم!")]], resize_keyboard=True)
-    )
-    return REG_BRONZE
+    try:
+        uid = update.effective_user.id
+        user_data = update.effective_user
+        await create_user(uid, user_data.username or "", user_data.first_name or "", user_data.last_name or "")
+        
+        # پیام اول
+        await update.message.reply_text(
+            "🐾 **سلام دوست من! به پتینکس خوش اومدی** 🧡\n\n"
+            "ما اینجاییم که مراقبت از همدم خونگیت رو **آسون‌تر، دقیق‌تر و حرفه‌ای‌تر** کنیم.\n\n"
+            "🩺 گزارش سلامت هوشمند | 🥗 رژیم غذایی اختصاصی\n"
+            "👨‍⚕️ مشاوره دامپزشکی | 🛒 پت‌شاپ، داروخانه، گرومر و …",
+            parse_mode="Markdown"
+        )
+        
+        # پیام دوم با دکمه
+        await update.message.reply_text(
+            "✨ یه چیز مهم:\n"
+            "تو الان جزو **۵۰ سرپرست اولی** هستی که پتینکس رو انتخاب کردی.\n"
+            "ما این حمایتت رو فراموش نمیکنیم! 💛",
+            parse_mode="Markdown"
+        )
+        
+        await update.message.reply_text(
+            "🚀 برای ساختن یه زندگی جذاب‌تر و راحت‌تر برای پتت آماده‌ای؟",
+            reply_markup=ReplyKeyboardMarkup([[KeyboardButton("🚀 بزن بریم!")]], resize_keyboard=True)
+        )
+        return REG_BRONZE
+    except Exception as e:
+        logger.exception(f"خطا در cmd_start: {e}")
+        await update.message.reply_text("❌ خطایی رخ داد. لطفاً دوباره تلاش کنید.")
+        return MAIN_MENU
 
 # ==================== عضویت ====================
 async def membership_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """پس از زدن دکمه بزن بریم، اینجا می‌آید"""
-    uid = update.effective_user.id
-    text = (
-        "با عضویت در خانواده ما، مستقیماً میشی **سرپرست VIP پتینکس** و از همه خدمات ویژه بهره‌مند میشی 🏆\n\n"
-        "🚀 **پیشنهاد ما؟**\n"
-        "توی قدم اول، از فرصت استفاده کن و عضو VIP خانواده پتینکس شو! (رایگان برای ۱۰۰ نفر اول 🔥)\n"
-        "توی قدم بعدی، گزارش سلامت همدم خونگی خودتو بساز 📝\n\n"
-        "وقتی پتینکس همدم خونگیت رو بشناسه، همه‌چیز شخصی‌تر و دقیق‌تر میشه! 🎯"
-    )
-    keyboard = [
-        [KeyboardButton("🏆 عضویت پلن طلایی (VIP) برای ۱۰۰ نفر اول رایگان 🔥")],
-        [KeyboardButton("⏳ بعداً عضو میشم")]
-    ]
-    await update.message.reply_text(text, reply_markup=ReplyKeyboardMarkup(keyboard, resize_keyboard=True), parse_mode="Markdown")
-    return REG_BRONZE
+    try:
+        uid = update.effective_user.id
+        text = (
+            "با عضویت در خانواده ما، مستقیماً میشی **سرپرست VIP پتینکس** و از همه خدمات ویژه بهره‌مند میشی 🏆\n\n"
+            "🚀 **پیشنهاد ما؟**\n"
+            "توی قدم اول، از فرصت استفاده کن و عضو VIP خانواده پتینکس شو! (رایگان برای ۱۰۰ نفر اول 🔥)\n"
+            "توی قدم بعدی، گزارش سلامت همدم خونگی خودتو بساز 📝\n\n"
+            "وقتی پتینکس همدم خونگیت رو بشناسه، همه‌چیز شخصی‌تر و دقیق‌تر میشه! 🎯"
+        )
+        keyboard = [
+            [KeyboardButton("🏆 عضویت پلن طلایی (VIP) برای ۱۰۰ نفر اول رایگان 🔥")],
+            [KeyboardButton("⏳ بعداً عضو میشم")]
+        ]
+        await update.message.reply_text(text, reply_markup=ReplyKeyboardMarkup(keyboard, resize_keyboard=True), parse_mode="Markdown")
+        return REG_BRONZE
+    except Exception as e:
+        logger.exception(f"خطا در membership_start: {e}")
+        await update.message.reply_text("❌ خطایی رخ داد. لطفاً دوباره تلاش کنید.")
+        return MAIN_MENU
 
 async def membership_later(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """کاربر بعداً عضو می‌شود را زد"""
-    await update.message.reply_text("باشه! هر وقت خواستی می‌تونی از منوی اصلی گزینه «وضعیت عضویت» رو بزنی و ثبت‌نام رو کامل کنی.")
-    return await show_main_menu(update, context)
+    try:
+        await update.message.reply_text("باشه! هر وقت خواستی می‌تونی از منوی اصلی گزینه «وضعیت عضویت» رو بزنی و ثبت‌نام رو کامل کنی.")
+        return await show_main_menu(update, context)
+    except Exception as e:
+        logger.exception(f"خطا در membership_later: {e}")
+        return MAIN_MENU
 
 async def membership_gold(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """کاربر عضویت طلایی را انتخاب کرد - شروع مراحل"""
-    uid = update.effective_user.id
-    # بررسی اینکه کاربر قبلاً سطحی داشته؟
-    user = await get_user(uid)
-    if user and user["level"] != "guest":
-        await update.message.reply_text("شما قبلاً عضو شده‌اید. برای تکمیل اطلاعات از منوی اصلی گزینه وضعیت عضویت را بزنید.")
-        return await show_main_menu(update, context)
+    try:
+        uid = update.effective_user.id
+        # بررسی اینکه کاربر قبلاً سطحی داشته؟
+        user = await get_user(uid)
+        if user and user["level"] != "guest":
+            await update.message.reply_text("شما قبلاً عضو شده‌اید. برای تکمیل اطلاعات از منوی اصلی گزینه وضعیت عضویت را بزنید.")
+            return await show_main_menu(update, context)
 
-    # مرحله برنز: درخواست شماره تماس
-    text = (
-        "📱 **مرحله ۱ از ۳: ثبت شماره تماس**\n\n"
-        "برای اینکه بتونیم یادآوری واکسن‌ها، داروها و اطلاع‌رسانی خدمات جدید رو برات بفرستیم، نیاز به شماره تماس داری.\n"
-        "با ارسال شماره، سطح عضویتت به **برنز** ارتقا پیدا می‌کنه و می‌تونی از **گزارش سلامت پایه** استفاده کنی!"
-    )
-    await update.message.reply_text(text, reply_markup=contact_keyboard(), parse_mode="Markdown")
-    return REG_BRONZE_CONTACT
+        # مرحله برنز: درخواست شماره تماس
+        text = (
+            "📱 **مرحله ۱ از ۳: ثبت شماره تماس**\n\n"
+            "برای اینکه بتونیم یادآوری واکسن‌ها، داروها و اطلاع‌رسانی خدمات جدید رو برات بفرستیم، نیاز به شماره تماس داری.\n"
+            "با ارسال شماره، سطح عضویتت به **برنز** ارتقا پیدا می‌کنه و می‌تونی از **گزارش سلامت پایه** استفاده کنی!"
+        )
+        await update.message.reply_text(text, reply_markup=contact_keyboard(), parse_mode="Markdown")
+        return REG_BRONZE_CONTACT
+    except Exception as e:
+        logger.exception(f"خطا در membership_gold: {e}")
+        await update.message.reply_text("❌ خطایی رخ داد. لطفاً دوباره تلاش کنید.")
+        return MAIN_MENU
 
 async def handle_contact(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """دریافت شماره تماس"""
-    contact = update.message.contact
-    if not contact:
-        await update.message.reply_text("لطفاً با استفاده از دکمه «ارسال شماره تماس» شماره خود را بفرستید.")
-        return REG_BRONZE_CONTACT
-    
-    uid = update.effective_user.id
-    phone = contact.phone_number
-    await update_user_phone(uid, phone)
-    await update_user_level(uid, "bronze")
-    
-    # بررسی ۱۰۰ نفر اول
-    count = await count_users_before(uid)
-    if count < 100:
-        await mark_first_100(uid)
-        await update.message.reply_text("🎉 تبریک! شما جزو ۱۰۰ نفر اول هستید و سطح طلایی بعداً رایگان برای شما فعال می‌شود.")
-    
-    await update.message.reply_text("✅ شماره شما با موفقیت ثبت شد. سطح شما: برنز")
-    
-    # مرحله نقره: ثبت اولین پت
-    text = (
-        "🐾 **مرحله ۲ از ۳: ثبت اولین پت**\n\n"
-        "برای اینکه بتونیم گزارش‌های سلامت دقیق و رژیم غذایی شخصی‌سازی‌شده برات آماده کنیم، نیاز به اطلاعات اولیه همدم خونگیت داریم.\n"
-        "با ثبت پتت، سطح عضویتت به **نقره** ارتقا پیدا می‌کنه و می‌تونی از **گزارش سلامت تخصصی** برای همین پت استفاده کنی!"
-    )
-    await update.message.reply_text(text, reply_markup=ReplyKeyboardMarkup([
-        [KeyboardButton("➕ ثبت پت جدید")],
-        ["❌ بعداً"]
-    ], resize_keyboard=True), parse_mode="Markdown")
-    return REG_SILVER
+    try:
+        contact = update.message.contact
+        if not contact:
+            await update.message.reply_text("لطفاً با استفاده از دکمه «ارسال شماره تماس» شماره خود را بفرستید.")
+            return REG_BRONZE_CONTACT
+        
+        uid = update.effective_user.id
+        phone = contact.phone_number
+        await update_user_phone(uid, phone)
+        await update_user_level(uid, "bronze")
+        
+        # بررسی ۱۰۰ نفر اول
+        count = await count_users_before(uid)
+        if count < 100:
+            await mark_first_100(uid)
+            await update.message.reply_text("🎉 تبریک! شما جزو ۱۰۰ نفر اول هستید و سطح طلایی بعداً رایگان برای شما فعال می‌شود.")
+        
+        await update.message.reply_text("✅ شماره شما با موفقیت ثبت شد. سطح شما: برنز")
+        
+        # مرحله نقره: ثبت اولین پت
+        text = (
+            "🐾 **مرحله ۲ از ۳: ثبت اولین پت**\n\n"
+            "برای اینکه بتونیم گزارش‌های سلامت دقیق و رژیم غذایی شخصی‌سازی‌شده برات آماده کنیم، نیاز به اطلاعات اولیه همدم خونگیت داریم.\n"
+            "با ثبت پتت، سطح عضویتت به **نقره** ارتقا پیدا می‌کنه و می‌تونی از **گزارش سلامت تخصصی** برای همین پت استفاده کنی!"
+        )
+        await update.message.reply_text(text, reply_markup=ReplyKeyboardMarkup([
+            [KeyboardButton("➕ ثبت پت جدید")],
+            ["❌ بعداً"]
+        ], resize_keyboard=True), parse_mode="Markdown")
+        return REG_SILVER
+    except Exception as e:
+        logger.exception(f"خطا در handle_contact: {e}")
+        await update.message.reply_text("❌ خطایی رخ داد. لطفاً دوباره تلاش کنید.")
+        return MAIN_MENU
 
 async def skip_silver(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """کاربر بعداً را انتخاب کرد"""
-    await update.message.reply_text("باشه! هر وقت خواستی می‌تونی از منوی اصلی گزینه «وضعیت عضویت» رو بزنی و پتت رو ثبت کنی.")
-    return await show_main_menu(update, context)
+    try:
+        await update.message.reply_text("باشه! هر وقت خواستی می‌تونی از منوی اصلی گزینه «وضعیت عضویت» رو بزنی و پتت رو ثبت کنی.")
+        return await show_main_menu(update, context)
+    except Exception as e:
+        logger.exception(f"خطا در skip_silver: {e}")
+        return MAIN_MENU
 
 async def start_add_pet(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """شروع ثبت پت جدید"""
-    session = get_session(update.effective_user.id)
-    session["temp_pet_data"] = {}
-    session["pet_reg_step"] = "name"
-    await update.message.reply_text("✏️ اسم پت قشنگت چیه؟", reply_markup=cancel_only_keyboard())
-    return REG_SILVER_QUESTIONS
+    try:
+        session = get_session(update.effective_user.id)
+        session["temp_pet_data"] = {}
+        session["pet_reg_step"] = "name"
+        await update.message.reply_text("✏️ اسم پت قشنگت چیه؟", reply_markup=cancel_only_keyboard())
+        return REG_SILVER_QUESTIONS
+    except Exception as e:
+        logger.exception(f"خطا در start_add_pet: {e}")
+        return MAIN_MENU
 
 async def handle_pet_registration(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    uid = update.effective_user.id
-    user_text = update.message.text.strip()
-    
-    if user_text == "❌ انصراف و بازگشت":
-        reset_session(uid)
-        return await show_main_menu(update, context)
-    
-    session = get_session(uid)
-    step = session.get("pet_reg_step", "name")
-    
-    if step == "name":
-        session["temp_pet_data"] = {"name": user_text}
-        session["pet_reg_step"] = "type"
-        await update.message.reply_text(
-            "🐾 سگه یا گربه؟",
-            reply_markup=build_option_keyboard([
+    try:
+        uid = update.effective_user.id
+        user_text = update.message.text.strip()
+        
+        if user_text == "❌ انصراف و بازگشت":
+            reset_session(uid)
+            return await show_main_menu(update, context)
+        
+        session = get_session(uid)
+        step = session.get("pet_reg_step", "name")
+        
+        if step == "name":
+            session["temp_pet_data"] = {"name": user_text}
+            session["pet_reg_step"] = "type"
+            await update.message.reply_text(
+                "🐾 سگه یا گربه؟",
+                reply_markup=build_option_keyboard([
+                    {"text": "🐶 سگ", "value": "dog"},
+                    {"text": "🐱 گربه", "value": "cat"},
+                ])
+            )
+            return REG_SILVER_QUESTIONS
+        
+        elif step == "type":
+            pet_type = find_option_value([
                 {"text": "🐶 سگ", "value": "dog"},
                 {"text": "🐱 گربه", "value": "cat"},
-            ])
-        )
-        return REG_SILVER_QUESTIONS
-    
-    elif step == "type":
-        pet_type = find_option_value([
-            {"text": "🐶 سگ", "value": "dog"},
-            {"text": "🐱 گربه", "value": "cat"},
-        ], user_text)
-        if not pet_type:
-            await update.message.reply_text("❌ لطفاً یکی از گزینه‌ها را انتخاب کنید.")
+            ], user_text)
+            if not pet_type:
+                await update.message.reply_text("❌ لطفاً یکی از گزینه‌ها را انتخاب کنید.")
+                return REG_SILVER_QUESTIONS
+            
+            session["temp_pet_data"]["type"] = pet_type
+            session["pet_reg_step"] = "breed"
+            
+            # تعیین گزینه‌های نژاد بر اساس نوع
+            if pet_type == "dog":
+                options = [
+                    {"text": "ژرمن", "value": "german"},
+                    {"text": "گلدن", "value": "golden"},
+                    {"text": "پودل", "value": "poodle"},
+                    {"text": "مخلوط", "value": "mixed"},
+                    {"text": "سایر", "value": "other"},
+                ]
+            else:
+                options = [
+                    {"text": "پرشین", "value": "persian"},
+                    {"text": "اسکاتیش", "value": "scottish"},
+                    {"text": "بریتیش", "value": "british"},
+                    {"text": "مخلوط", "value": "mixed"},
+                    {"text": "سایر", "value": "other"},
+                ]
+            await update.message.reply_text(
+                "🧬 نژادش چیه؟",
+                reply_markup=build_option_keyboard(options)
+            )
             return REG_SILVER_QUESTIONS
         
-        session["temp_pet_data"]["type"] = pet_type
-        session["pet_reg_step"] = "breed"
-        
-        # تعیین گزینه‌های نژاد بر اساس نوع
-        if pet_type == "dog":
-            options = [
-                {"text": "ژرمن", "value": "german"},
-                {"text": "گلدن", "value": "golden"},
-                {"text": "پودل", "value": "poodle"},
-                {"text": "مخلوط", "value": "mixed"},
-                {"text": "سایر", "value": "other"},
-            ]
-        else:
-            options = [
-                {"text": "پرشین", "value": "persian"},
-                {"text": "اسکاتیش", "value": "scottish"},
-                {"text": "بریتیش", "value": "british"},
-                {"text": "مخلوط", "value": "mixed"},
-                {"text": "سایر", "value": "other"},
-            ]
-        await update.message.reply_text(
-            "🧬 نژادش چیه؟",
-            reply_markup=build_option_keyboard(options)
-        )
-        return REG_SILVER_QUESTIONS
-    
-    elif step == "breed":
-        pet_type = session["temp_pet_data"]["type"]
-        if pet_type == "dog":
-            options = [
-                {"text": "ژرمن", "value": "german"},
-                {"text": "گلدن", "value": "golden"},
-                {"text": "پودل", "value": "poodle"},
-                {"text": "مخلوط", "value": "mixed"},
-                {"text": "سایر", "value": "other"},
-            ]
-        else:
-            options = [
-                {"text": "پرشین", "value": "persian"},
-                {"text": "اسکاتیش", "value": "scottish"},
-                {"text": "بریتیش", "value": "british"},
-                {"text": "مخلوط", "value": "mixed"},
-                {"text": "سایر", "value": "other"},
-            ]
-        breed = find_option_value(options, user_text)
-        if not breed:
-            await update.message.reply_text("❌ لطفاً یکی از گزینه‌ها را انتخاب کنید.")
+        elif step == "breed":
+            pet_type = session["temp_pet_data"]["type"]
+            if pet_type == "dog":
+                options = [
+                    {"text": "ژرمن", "value": "german"},
+                    {"text": "گلدن", "value": "golden"},
+                    {"text": "پودل", "value": "poodle"},
+                    {"text": "مخلوط", "value": "mixed"},
+                    {"text": "سایر", "value": "other"},
+                ]
+            else:
+                options = [
+                    {"text": "پرشین", "value": "persian"},
+                    {"text": "اسکاتیش", "value": "scottish"},
+                    {"text": "بریتیش", "value": "british"},
+                    {"text": "مخلوط", "value": "mixed"},
+                    {"text": "سایر", "value": "other"},
+                ]
+            breed = find_option_value(options, user_text)
+            if not breed:
+                await update.message.reply_text("❌ لطفاً یکی از گزینه‌ها را انتخاب کنید.")
+                return REG_SILVER_QUESTIONS
+            
+            session["temp_pet_data"]["breed"] = breed
+            session["pet_reg_step"] = "age"
+            await update.message.reply_text(
+                "📅 گروه سنی:",
+                reply_markup=build_option_keyboard([
+                    {"text": "🐣 زیر ۱ سال", "value": "baby"},
+                    {"text": "🐕 ۱-۳ سال", "value": "young"},
+                    {"text": "🐕‍🦺 ۳-۷ سال", "value": "adult"},
+                    {"text": "🦮 بالای ۷ سال", "value": "senior"},
+                ])
+            )
             return REG_SILVER_QUESTIONS
         
-        session["temp_pet_data"]["breed"] = breed
-        session["pet_reg_step"] = "age"
-        await update.message.reply_text(
-            "📅 گروه سنی:",
-            reply_markup=build_option_keyboard([
+        elif step == "age":
+            age = find_option_value([
                 {"text": "🐣 زیر ۱ سال", "value": "baby"},
                 {"text": "🐕 ۱-۳ سال", "value": "young"},
                 {"text": "🐕‍🦺 ۳-۷ سال", "value": "adult"},
                 {"text": "🦮 بالای ۷ سال", "value": "senior"},
-            ])
-        )
-        return REG_SILVER_QUESTIONS
-    
-    elif step == "age":
-        age = find_option_value([
-            {"text": "🐣 زیر ۱ سال", "value": "baby"},
-            {"text": "🐕 ۱-۳ سال", "value": "young"},
-            {"text": "🐕‍🦺 ۳-۷ سال", "value": "adult"},
-            {"text": "🦮 بالای ۷ سال", "value": "senior"},
-        ], user_text)
-        if not age:
-            await update.message.reply_text("❌ لطفاً یکی از گزینه‌ها را انتخاب کنید.")
+            ], user_text)
+            if not age:
+                await update.message.reply_text("❌ لطفاً یکی از گزینه‌ها را انتخاب کنید.")
+                return REG_SILVER_QUESTIONS
+            
+            session["temp_pet_data"]["age_group"] = age
+            session["pet_reg_step"] = "weight"
+            await update.message.reply_text(
+                "⚖️ وزن حدودی (کیلوگرم) - اگه نمی‌دونی یه چیزی بنویس:",
+                reply_markup=cancel_only_keyboard()
+            )
             return REG_SILVER_QUESTIONS
         
-        session["temp_pet_data"]["age_group"] = age
-        session["pet_reg_step"] = "weight"
-        await update.message.reply_text(
-            "⚖️ وزن حدودی (کیلوگرم) - اگه نمی‌دونی یه چیزی بنویس:",
-            reply_markup=cancel_only_keyboard()
-        )
+        elif step == "weight":
+            try:
+                weight = float(user_text.replace(",", "."))
+            except ValueError:
+                weight = None
+            
+            data = session["temp_pet_data"]
+            data["weight"] = weight
+            
+            # ذخیره در دیتابیس
+            await add_pet(
+                uid,
+                data["name"],
+                data["type"],
+                data["breed"],
+                data["age_group"],
+                data.get("weight")
+            )
+            
+            # دریافت سطح فعلی کاربر
+            user = await get_user(uid)
+            current_level = user["level"] if user else "guest"
+            
+            # پاکسازی session موقت
+            session.pop("pet_reg_step", None)
+            session.pop("temp_pet_data", None)
+            
+            # اگر کاربر قبلاً طلایی نبوده، به مرحله طلا برو
+            if current_level != "gold":
+                # اگر کاربر برنز بوده، او را نقره کن
+                if current_level == "bronze":
+                    await update_user_level(uid, "silver")
+                await update.message.reply_text(f"✅ پت {data['name']} با موفقیت ثبت شد.")
+                
+                # تنظیم مرحله طلا
+                session["gold_step"] = "email"
+                session["gold_data"] = {}
+                
+                # نمایش مرحله طلا
+                text = (
+                    "📧 **مرحله ۳ از ۳: تکمیل اطلاعات برای VIP طلایی**\n\n"
+                    "ایمیلت رو بده تا گزارش‌های سلامت رو به صورت PDF برات بفرستیم و از تخفیف‌ها و رویدادهای ویژه با خبر بشی.\n"
+                    "شهر و منطقه‌ات رو هم بگو تا بهترین خدمات نزدیک خونه‌ت رو بهت معرفی کنیم.\n"
+                    "با تکمیل این اطلاعات، عضو **VIP طلایی** میشی و به همه خدمات ویژه دسترسی پیدا می‌کنی!"
+                )
+                await update.message.reply_text(
+                    text,
+                    reply_markup=ReplyKeyboardMarkup([
+                        [KeyboardButton("📧 وارد کردن ایمیل")],
+                        ["❌ بعداً"]
+                    ], resize_keyboard=True),
+                    parse_mode="Markdown"
+                )
+                return REG_GOLD
+            else:
+                # کاربر قبلاً طلایی بوده، فقط پیام موفقیت بده و به منو برگرد
+                await update.message.reply_text(f"✅ پت {data['name']} با موفقیت ثبت شد.")
+                return await show_main_menu(update, context)
+        
         return REG_SILVER_QUESTIONS
-    
-    elif step == "weight":
-        try:
-            weight = float(user_text.replace(",", "."))
-        except ValueError:
-            weight = None
-        
-        data = session["temp_pet_data"]
-        data["weight"] = weight
-        
-        # ذخیره در دیتابیس
-        await add_pet(
-            uid,
-            data["name"],
-            data["type"],
-            data["breed"],
-            data["age_group"],
-            data.get("weight")
-        )
-        
-        # دریافت سطح فعلی کاربر
-        user = await get_user(uid)
-        current_level = user["level"] if user else "guest"
-        
-        # پاکسازی session موقت
-        session.pop("pet_reg_step", None)
-        session.pop("temp_pet_data", None)
-        
-        # اگر کاربر قبلاً طلایی نبوده، به مرحله طلا برو
-        if current_level != "gold":
-            # اگر کاربر برنز بوده، او را نقره کن
-            if current_level == "bronze":
-                await update_user_level(uid, "silver")
-            await update.message.reply_text(f"✅ پت {data['name']} با موفقیت ثبت شد.")
-            
-            # تنظیم مرحله طلا
-            session["gold_step"] = "email"
-            session["gold_data"] = {}
-            
-            # نمایش مرحله طلا
-            text = (
-                "📧 **مرحله ۳ از ۳: تکمیل اطلاعات برای VIP طلایی**\n\n"
-                "ایمیلت رو بده تا گزارش‌های سلامت رو به صورت PDF برات بفرستیم و از تخفیف‌ها و رویدادهای ویژه با خبر بشی.\n"
-                "شهر و منطقه‌ات رو هم بگو تا بهترین خدمات نزدیک خونه‌ت رو بهت معرفی کنیم.\n"
-                "با تکمیل این اطلاعات، عضو **VIP طلایی** میشی و به همه خدمات ویژه دسترسی پیدا می‌کنی!"
-            )
-            await update.message.reply_text(
-                text,
-                reply_markup=ReplyKeyboardMarkup([
-                    [KeyboardButton("📧 وارد کردن ایمیل")],
-                    ["❌ بعداً"]
-                ], resize_keyboard=True),
-                parse_mode="Markdown"
-            )
-            return REG_GOLD
-        else:
-            # کاربر قبلاً طلایی بوده، فقط پیام موفقیت بده و به منو برگرد
-            await update.message.reply_text(f"✅ پت {data['name']} با موفقیت ثبت شد.")
-            return await show_main_menu(update, context)
-    
-    return REG_SILVER_QUESTIONS
+    except Exception as e:
+        logger.exception(f"خطا در handle_pet_registration: {e}")
+        await update.message.reply_text("❌ خطایی رخ داد. لطفاً دوباره تلاش کنید.")
+        return MAIN_MENU
 
 async def skip_gold(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    await update.message.reply_text("باشه! هر وقت خواستی می‌تونی از منوی اصلی گزینه «وضعیت عضویت» رو بزنی و اطلاعاتت رو کامل کنی.")
-    return await show_main_menu(update, context)
+    try:
+        await update.message.reply_text("باشه! هر وقت خواستی می‌تونی از منوی اصلی گزینه «وضعیت عضویت» رو بزنی و اطلاعاتت رو کامل کنی.")
+        return await show_main_menu(update, context)
+    except Exception as e:
+        logger.exception(f"خطا در skip_gold: {e}")
+        return MAIN_MENU
 
 async def start_gold(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    uid = update.effective_user.id
-    session = get_session(uid)
-    session["gold_step"] = "email"
-    session["gold_data"] = {}
-    await update.message.reply_text("✉️ لطفاً ایمیل خود را وارد کنید:", reply_markup=cancel_only_keyboard())
-    return REG_GOLD
+    try:
+        uid = update.effective_user.id
+        session = get_session(uid)
+        session["gold_step"] = "email"
+        session["gold_data"] = {}
+        await update.message.reply_text("✉️ لطفاً ایمیل خود را وارد کنید:", reply_markup=cancel_only_keyboard())
+        return REG_GOLD
+    except Exception as e:
+        logger.exception(f"خطا در start_gold: {e}")
+        return MAIN_MENU
 
 async def handle_gold_registration(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    uid = update.effective_user.id
-    user_text = update.message.text.strip()
-    session = get_session(uid)
-    step = session.get("gold_step")
-    
-    if not step:
-        return await show_main_menu(update, context)
+    try:
+        uid = update.effective_user.id
+        user_text = update.message.text.strip()
+        session = get_session(uid)
+        step = session.get("gold_step")
+        
+        if not step:
+            return await show_main_menu(update, context)
 
-    if user_text == "❌ انصراف و بازگشت" or user_text == "❌ بعداً":
-        session.pop("gold_step", None)
-        session.pop("gold_data", None)
-        await update.message.reply_text("❌ عملیات لغو شد.")
-        return await show_main_menu(update, context)
+        if user_text == "❌ انصراف و بازگشت" or user_text == "❌ بعداً":
+            session.pop("gold_step", None)
+            session.pop("gold_data", None)
+            await update.message.reply_text("❌ عملیات لغو شد.")
+            return await show_main_menu(update, context)
 
-    if step == "email":
-        if "@" not in user_text or "." not in user_text:
-            await update.message.reply_text("❌ ایمیل معتبر نیست. لطفاً دوباره وارد کنید.")
+        if step == "email":
+            if "@" not in user_text or "." not in user_text:
+                await update.message.reply_text("❌ ایمیل معتبر نیست. لطفاً دوباره وارد کنید.")
+                return REG_GOLD
+            session["gold_data"]["email"] = user_text
+            session["gold_step"] = "city"
+            await update.message.reply_text("🏙️ شهر خود را وارد کنید:", reply_markup=cancel_only_keyboard())
             return REG_GOLD
-        session["gold_data"]["email"] = user_text
-        session["gold_step"] = "city"
-        await update.message.reply_text("🏙️ شهر خود را وارد کنید:", reply_markup=cancel_only_keyboard())
+
+        elif step == "city":
+            session["gold_data"]["city"] = user_text
+            session["gold_step"] = "district"
+            await update.message.reply_text("📍 منطقه یا محله (اختیاری):", reply_markup=cancel_only_keyboard())
+            return REG_GOLD
+
+        elif step == "district":
+            data = session["gold_data"]
+            email = data.get("email", "")
+            city = data.get("city", "")
+            district = user_text if user_text != "❌ انصراف و بازگشت" else ""
+            await update_user_email_city(uid, email, city, district)
+            await update_user_level(uid, "gold")
+            session.pop("gold_step", None)
+            session.pop("gold_data", None)
+            await update.message.reply_text("🎉 تبریک! شما عضو VIP طلایی پتینکس شدید. به همه خدمات دسترسی دارید!")
+            return await show_main_menu(update, context)
+
         return REG_GOLD
-
-    elif step == "city":
-        session["gold_data"]["city"] = user_text
-        session["gold_step"] = "district"
-        await update.message.reply_text("📍 منطقه یا محله (اختیاری):", reply_markup=cancel_only_keyboard())
-        return REG_GOLD
-
-    elif step == "district":
-        data = session["gold_data"]
-        email = data.get("email", "")
-        city = data.get("city", "")
-        district = user_text if user_text != "❌ انصراف و بازگشت" else ""
-        await update_user_email_city(uid, email, city, district)
-        await update_user_level(uid, "gold")
-        session.pop("gold_step", None)
-        session.pop("gold_data", None)
-        await update.message.reply_text("🎉 تبریک! شما عضو VIP طلایی پتینکس شدید. به همه خدمات دسترسی دارید!")
-        return await show_main_menu(update, context)
-
-    return REG_GOLD
+    except Exception as e:
+        logger.exception(f"خطا در handle_gold_registration: {e}")
+        await update.message.reply_text("❌ خطایی رخ داد. لطفاً دوباره تلاش کنید.")
+        return MAIN_MENU
 
 # ==================== گزارش سلامت پایه ====================
 async def start_basic_health(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    uid = update.effective_user.id
-    user = await get_user(uid)
-    if user["level"] not in ["bronze", "silver", "gold"]:
-        await update.message.reply_text("برای استفاده از گزارش پایه باید سطح برنز یا بالاتر داشته باشید. از گزینه عضویت اقدام کنید.")
+    try:
+        uid = update.effective_user.id
+        user = await get_user(uid)
+        if user["level"] not in ["bronze", "silver", "gold"]:
+            await update.message.reply_text("برای استفاده از گزارش پایه باید سطح برنز یا بالاتر داشته باشید. از گزینه عضویت اقدام کنید.")
+            return MAIN_MENU
+        # اگر چند پت دارد، ابتدا انتخاب پت
+        pets = await get_user_pets(uid)
+        if not pets:
+            await update.message.reply_text("شما هنوز پتی ثبت نکرده‌اید. لطفاً ابتدا یک پت اضافه کنید.")
+            return MAIN_MENU
+        if len(pets) == 1:
+            pet_id = pets[0]["pet_id"]
+            session = get_session(uid)
+            session["selected_pet_id"] = pet_id
+            session["active_flow"] = "basic_health"
+            session["current_question_id"] = "b1"
+            session["prev_question_id"] = None
+            session["answers"] = {}
+            return await send_basic_question(uid, context)
+        else:
+            # نمایش لیست پت‌ها برای انتخاب
+            keyboard = [[KeyboardButton(p["name"])] for p in pets]
+            keyboard.append([KeyboardButton("❌ انصراف")])
+            await update.message.reply_text("برای کدوم پت می‌خوای گزارش بسازی؟", reply_markup=ReplyKeyboardMarkup(keyboard, resize_keyboard=True))
+            return BASIC_HEALTH
+    except Exception as e:
+        logger.exception(f"خطا در start_basic_health: {e}")
         return MAIN_MENU
-    # اگر چند پت دارد، ابتدا انتخاب پت
-    pets = await get_user_pets(uid)
-    if not pets:
-        await update.message.reply_text("شما هنوز پتی ثبت نکرده‌اید. لطفاً ابتدا یک پت اضافه کنید.")
-        return MAIN_MENU
-    if len(pets) == 1:
-        pet_id = pets[0]["pet_id"]
+
+async def basic_select_pet(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    try:
+        uid = update.effective_user.id
+        pet_name = update.message.text.strip()
+        if pet_name == "❌ انصراف":
+            return await show_main_menu(update, context)
+        pets = await get_user_pets(uid)
+        selected = None
+        for p in pets:
+            if p["name"] == pet_name:
+                selected = p
+                break
+        if not selected:
+            await update.message.reply_text("پت مورد نظر یافت نشد. لطفاً یکی از گزینه‌ها را انتخاب کنید.")
+            return BASIC_HEALTH
         session = get_session(uid)
-        session["selected_pet_id"] = pet_id
+        session["selected_pet_id"] = selected["pet_id"]
         session["active_flow"] = "basic_health"
         session["current_question_id"] = "b1"
         session["prev_question_id"] = None
         session["answers"] = {}
         return await send_basic_question(uid, context)
-    else:
-        # نمایش لیست پت‌ها برای انتخاب
-        keyboard = [[KeyboardButton(p["name"])] for p in pets]
-        keyboard.append([KeyboardButton("❌ انصراف")])
-        await update.message.reply_text("برای کدوم پت می‌خوای گزارش بسازی؟", reply_markup=ReplyKeyboardMarkup(keyboard, resize_keyboard=True))
-        return BASIC_HEALTH
-
-async def basic_select_pet(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    uid = update.effective_user.id
-    pet_name = update.message.text.strip()
-    if pet_name == "❌ انصراف":
-        return await show_main_menu(update, context)
-    pets = await get_user_pets(uid)
-    selected = None
-    for p in pets:
-        if p["name"] == pet_name:
-            selected = p
-            break
-    if not selected:
-        await update.message.reply_text("پت مورد نظر یافت نشد. لطفاً یکی از گزینه‌ها را انتخاب کنید.")
-        return BASIC_HEALTH
-    session = get_session(uid)
-    session["selected_pet_id"] = selected["pet_id"]
-    session["active_flow"] = "basic_health"
-    session["current_question_id"] = "b1"
-    session["prev_question_id"] = None
-    session["answers"] = {}
-    return await send_basic_question(uid, context)
+    except Exception as e:
+        logger.exception(f"خطا در basic_select_pet: {e}")
+        return MAIN_MENU
 
 async def send_basic_question(uid: int, context: ContextTypes.DEFAULT_TYPE) -> int:
-    session = get_session(uid)
-    qid = session["current_question_id"]
-    question = get_basic_question(qid)
-    if not question:
-        return await finish_basic_health(uid, context)
-    
-    text = question["text"]
-    if question.get("placeholder"):
-        text += f"\n\n💡 {question['placeholder']}"
-    
-    q_type = question["type"]
-    if q_type == "text_input":
-        if question.get("options"):
+    try:
+        session = get_session(uid)
+        qid = session["current_question_id"]
+        question = get_basic_question(qid)
+        if not question:
+            return await finish_basic_health(uid, context)
+        
+        text = question["text"]
+        if question.get("placeholder"):
+            text += f"\n\n💡 {question['placeholder']}"
+        
+        q_type = question["type"]
+        if q_type == "text_input":
+            if question.get("options"):
+                kb = build_option_keyboard(question["options"])
+            else:
+                kb = cancel_only_keyboard()
+            await context.bot.send_message(chat_id=uid, text=text, reply_markup=kb)
+            return BASIC_HEALTH_ANSWERING
+        elif q_type == "number_input":
+            await context.bot.send_message(chat_id=uid, text=text, reply_markup=cancel_only_keyboard())
+            return BASIC_HEALTH_ANSWERING
+        elif q_type == "inline_button":
             kb = build_option_keyboard(question["options"])
-        else:
-            kb = cancel_only_keyboard()
-        await context.bot.send_message(chat_id=uid, text=text, reply_markup=kb)
-        return BASIC_HEALTH_ANSWERING
-    elif q_type == "number_input":
-        await context.bot.send_message(chat_id=uid, text=text, reply_markup=cancel_only_keyboard())
-        return BASIC_HEALTH_ANSWERING
-    elif q_type == "inline_button":
-        kb = build_option_keyboard(question["options"])
-        await context.bot.send_message(chat_id=uid, text=text, reply_markup=kb)
-        return BASIC_HEALTH_ANSWERING
+            await context.bot.send_message(chat_id=uid, text=text, reply_markup=kb)
+            return BASIC_HEALTH_ANSWERING
+    except Exception as e:
+        logger.exception(f"خطا در send_basic_question: {e}")
+        return MAIN_MENU
 
 async def handle_basic_answer(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    uid = update.effective_user.id
-    user_text = update.message.text.strip()
-    if user_text == "❌ انصراف و بازگشت":
-        return await cancel_basic(update, context)
-    
-    session = get_session(uid)
-    qid = session["current_question_id"]
-    question = get_basic_question(qid)
-    if not question:
-        return MAIN_MENU
-    
-    variable = question["variable"]
-    q_type = question["type"]
-    
-    if q_type == "text_input":
-        if question.get("options"):
-            # اگر گزینه دارد و کاربر گزینه را زد
-            value = find_option_value(question["options"], user_text)
-            if value:
-                session["answers"][variable] = value
+    try:
+        uid = update.effective_user.id
+        user_text = update.message.text.strip()
+        if user_text == "❌ انصراف و بازگشت":
+            return await cancel_basic(update, context)
+        
+        session = get_session(uid)
+        qid = session["current_question_id"]
+        question = get_basic_question(qid)
+        if not question:
+            return MAIN_MENU
+        
+        variable = question["variable"]
+        q_type = question["type"]
+        
+        if q_type == "text_input":
+            if question.get("options"):
+                # اگر گزینه دارد و کاربر گزینه را زد
+                value = find_option_value(question["options"], user_text)
+                if value:
+                    session["answers"][variable] = value
+                else:
+                    session["answers"][variable] = user_text
             else:
                 session["answers"][variable] = user_text
+        elif q_type == "number_input":
+            try:
+                num = float(user_text.replace(",", "."))
+                session["answers"][variable] = num
+            except:
+                await update.message.reply_text("لطفاً یک عدد معتبر وارد کنید.")
+                return BASIC_HEALTH_ANSWERING
+        elif q_type == "inline_button":
+            value = find_option_value(question["options"], user_text)
+            if not value:
+                await update.message.reply_text("لطفاً یکی از گزینه‌ها را انتخاب کنید.")
+                return BASIC_HEALTH_ANSWERING
+            session["answers"][variable] = value
+        
+        # برو به سوال بعدی
+        next_q = get_next_basic(qid, session["answers"])
+        if next_q:
+            session["current_question_id"] = next_q
+            return await send_basic_question(uid, context)
         else:
-            session["answers"][variable] = user_text
-    elif q_type == "number_input":
-        try:
-            num = float(user_text.replace(",", "."))
-            session["answers"][variable] = num
-        except:
-            await update.message.reply_text("لطفاً یک عدد معتبر وارد کنید.")
-            return BASIC_HEALTH_ANSWERING
-    elif q_type == "inline_button":
-        value = find_option_value(question["options"], user_text)
-        if not value:
-            await update.message.reply_text("لطفاً یکی از گزینه‌ها را انتخاب کنید.")
-            return BASIC_HEALTH_ANSWERING
-        session["answers"][variable] = value
-    
-    # برو به سوال بعدی
-    next_q = get_next_basic(qid, session["answers"])
-    if next_q:
-        session["current_question_id"] = next_q
-        return await send_basic_question(uid, context)
-    else:
-        return await finish_basic_health(uid, context)
+            return await finish_basic_health(uid, context)
+    except Exception as e:
+        logger.exception(f"خطا در handle_basic_answer: {e}")
+        return MAIN_MENU
 
 async def finish_basic_health(uid: int, context: ContextTypes.DEFAULT_TYPE) -> int:
-    session = get_session(uid)
-    answers = session["answers"]
-    pet_id = session.get("selected_pet_id")
-    if pet_id:
-        await save_health_report(uid, pet_id, "basic", answers)
-        prompt = generate_basic_prompt(answers)
-        await context.bot.send_message(chat_id=uid, text=f"✅ گزارش سلامت پایه با موفقیت ثبت شد.\n\n{prompt}")
-    reset_session(uid)
-    user = await get_user(uid)
-    level = user["level"] if user else "guest"
-    await context.bot.send_message(chat_id=uid, text="🏠 منوی اصلی:", reply_markup=get_dynamic_keyboard(level))
-    return MAIN_MENU
+    try:
+        session = get_session(uid)
+        answers = session["answers"]
+        pet_id = session.get("selected_pet_id")
+        if pet_id:
+            await save_health_report(uid, pet_id, "basic", answers)
+            prompt = generate_basic_prompt(answers)
+            await context.bot.send_message(chat_id=uid, text=f"✅ گزارش سلامت پایه با موفقیت ثبت شد.\n\n{prompt}")
+        reset_session(uid)
+        user = await get_user(uid)
+        level = user["level"] if user else "guest"
+        await context.bot.send_message(chat_id=uid, text="🏠 منوی اصلی:", reply_markup=get_dynamic_keyboard(level))
+        return MAIN_MENU
+    except Exception as e:
+        logger.exception(f"خطا در finish_basic_health: {e}")
+        return MAIN_MENU
 
 async def cancel_basic(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    uid = update.effective_user.id
-    reset_session(uid)
-    await update.message.reply_text("❌ گزارش لغو شد.")
-    return await show_main_menu(update, context)
+    try:
+        uid = update.effective_user.id
+        reset_session(uid)
+        await update.message.reply_text("❌ گزارش لغو شد.")
+        return await show_main_menu(update, context)
+    except Exception as e:
+        logger.exception(f"خطا در cancel_basic: {e}")
+        return MAIN_MENU
 
 # ==================== گزارش سلامت VIP ====================
 async def start_vip_health(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    uid = update.effective_user.id
-    user = await get_user(uid)
-    if user["level"] not in ["silver", "gold"]:
-        await update.message.reply_text("گزارش تخصصی فقط برای اعضای نقره و طلا قابل استفاده است. لطفاً سطح عضویت خود را ارتقا دهید.")
+    try:
+        uid = update.effective_user.id
+        user = await get_user(uid)
+        if user["level"] not in ["silver", "gold"]:
+            await update.message.reply_text("گزارش تخصصی فقط برای اعضای نقره و طلا قابل استفاده است. لطفاً سطح عضویت خود را ارتقا دهید.")
+            return MAIN_MENU
+        pets = await get_user_pets(uid)
+        if not pets:
+            await update.message.reply_text("شما هنوز پتی ثبت نکرده‌اید. لطفاً ابتدا یک پت اضافه کنید.")
+            return MAIN_MENU
+        if len(pets) == 1:
+            pet_id = pets[0]["pet_id"]
+            session = get_session(uid)
+            session["selected_pet_id"] = pet_id
+            session["active_flow"] = "vip_health"
+            session["current_question_id"] = get_first_question_id()
+            session["prev_question_id"] = None
+            session["answers"] = {}
+            return await send_vip_question(uid, context)
+        else:
+            keyboard = [[KeyboardButton(p["name"])] for p in pets]
+            keyboard.append([KeyboardButton("❌ انصراف")])
+            await update.message.reply_text("برای کدوم پت می‌خوای گزارش تخصصی بسازی؟", reply_markup=ReplyKeyboardMarkup(keyboard, resize_keyboard=True))
+            return VIP_HEALTH
+    except Exception as e:
+        logger.exception(f"خطا در start_vip_health: {e}")
         return MAIN_MENU
-    pets = await get_user_pets(uid)
-    if not pets:
-        await update.message.reply_text("شما هنوز پتی ثبت نکرده‌اید. لطفاً ابتدا یک پت اضافه کنید.")
-        return MAIN_MENU
-    if len(pets) == 1:
-        pet_id = pets[0]["pet_id"]
+
+async def vip_select_pet(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    try:
+        uid = update.effective_user.id
+        pet_name = update.message.text.strip()
+        if pet_name == "❌ انصراف":
+            return await show_main_menu(update, context)
+        pets = await get_user_pets(uid)
+        selected = None
+        for p in pets:
+            if p["name"] == pet_name:
+                selected = p
+                break
+        if not selected:
+            await update.message.reply_text("پت مورد نظر یافت نشد. لطفاً یکی از گزینه‌ها را انتخاب کنید.")
+            return VIP_HEALTH
         session = get_session(uid)
-        session["selected_pet_id"] = pet_id
+        session["selected_pet_id"] = selected["pet_id"]
         session["active_flow"] = "vip_health"
         session["current_question_id"] = get_first_question_id()
         session["prev_question_id"] = None
         session["answers"] = {}
         return await send_vip_question(uid, context)
-    else:
-        keyboard = [[KeyboardButton(p["name"])] for p in pets]
-        keyboard.append([KeyboardButton("❌ انصراف")])
-        await update.message.reply_text("برای کدوم پت می‌خوای گزارش تخصصی بسازی؟", reply_markup=ReplyKeyboardMarkup(keyboard, resize_keyboard=True))
-        return VIP_HEALTH
-
-async def vip_select_pet(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    uid = update.effective_user.id
-    pet_name = update.message.text.strip()
-    if pet_name == "❌ انصراف":
-        return await show_main_menu(update, context)
-    pets = await get_user_pets(uid)
-    selected = None
-    for p in pets:
-        if p["name"] == pet_name:
-            selected = p
-            break
-    if not selected:
-        await update.message.reply_text("پت مورد نظر یافت نشد. لطفاً یکی از گزینه‌ها را انتخاب کنید.")
-        return VIP_HEALTH
-    session = get_session(uid)
-    session["selected_pet_id"] = selected["pet_id"]
-    session["active_flow"] = "vip_health"
-    session["current_question_id"] = get_first_question_id()
-    session["prev_question_id"] = None
-    session["answers"] = {}
-    return await send_vip_question(uid, context)
+    except Exception as e:
+        logger.exception(f"خطا در vip_select_pet: {e}")
+        return MAIN_MENU
 
 async def send_vip_question(uid: int, context: ContextTypes.DEFAULT_TYPE) -> int:
-    session = get_session(uid)
-    qid = session["current_question_id"]
-    if qid is None:
-        return await finish_vip_health(uid, context)
-    question = get_question_by_id(qid)
-    if not question:
-        return await finish_vip_health(uid, context)
-    answers = session["answers"]
-    # transition
-    transition_msg = should_show_section_transition(qid, session.get("prev_question_id"), answers)
-    if transition_msg:
-        await context.bot.send_message(chat_id=uid, text=transition_msg, parse_mode="HTML")
-    # شماره سوال
-    current_num = get_current_question_number(qid, answers)
-    progress = calculate_progress(qid, answers)
-    header = f"📊 سؤال {current_num} از ~{TOTAL_QUESTIONS_APPROX} ({progress}%)"
-    pet_name = answers.get("pet_name", "پتت")
-    q_text = question["text"].replace("{pet_name}", pet_name)
-    text = f"{header}\n\n{q_text}"
-    if question.get("micro_copy"):
-        text += f"\n\n{question['micro_copy']}"
-    q_type = question["type"]
-    options = get_options_for_question(question, answers)
-    if q_type == "text_input":
-        if options:
-            kb = build_option_keyboard(options)
-        else:
+    try:
+        session = get_session(uid)
+        qid = session["current_question_id"]
+        if qid is None:
+            return await finish_vip_health(uid, context)
+        question = get_question_by_id(qid)
+        if not question:
+            return await finish_vip_health(uid, context)
+        answers = session["answers"]
+        # transition
+        transition_msg = should_show_section_transition(qid, session.get("prev_question_id"), answers)
+        if transition_msg:
+            await context.bot.send_message(chat_id=uid, text=transition_msg, parse_mode="HTML")
+        # شماره سوال
+        current_num = get_current_question_number(qid, answers)
+        progress = calculate_progress(qid, answers)
+        header = f"📊 سؤال {current_num} از ~{TOTAL_QUESTIONS_APPROX} ({progress}%)"
+        pet_name = answers.get("pet_name", "پتت")
+        q_text = question["text"].replace("{pet_name}", pet_name)
+        text = f"{header}\n\n{q_text}"
+        if question.get("micro_copy"):
+            text += f"\n\n{question['micro_copy']}"
+        q_type = question["type"]
+        options = get_options_for_question(question, answers)
+        if q_type == "text_input":
+            if options:
+                kb = build_option_keyboard(options)
+            else:
+                kb = cancel_only_keyboard()
+            if question.get("placeholder"):
+                text += f"\n\n💡 {question['placeholder']}"
+            await context.bot.send_message(chat_id=uid, text=text, parse_mode="HTML", reply_markup=kb)
+            return VIP_HEALTH_ANSWERING
+        elif q_type == "number_input":
             kb = cancel_only_keyboard()
-        if question.get("placeholder"):
-            text += f"\n\n💡 {question['placeholder']}"
-        await context.bot.send_message(chat_id=uid, text=text, parse_mode="HTML", reply_markup=kb)
-        return VIP_HEALTH_ANSWERING
-    elif q_type == "number_input":
-        kb = cancel_only_keyboard()
-        if question.get("placeholder"):
-            text += f"\n\n💡 {question['placeholder']}"
-        num_range = question.get("number_range")
-        if num_range:
-            text += f"\n(محدوده مجاز: {num_range['min']} تا {num_range['max']})"
-        await context.bot.send_message(chat_id=uid, text=text, parse_mode="HTML", reply_markup=kb)
-        return VIP_HEALTH_ANSWERING
-    elif q_type == "multi_select":
-        session["multi_select_temp"] = []
-        kb = build_multi_select_keyboard(options, [], question.get("confirm_button", "✅ تأیید و ادامه"))
-        await context.bot.send_message(chat_id=uid, text=text, parse_mode="HTML", reply_markup=kb)
-        return VIP_HEALTH_MULTI
-    else:
-        kb = build_option_keyboard(options)
-        await context.bot.send_message(chat_id=uid, text=text, parse_mode="HTML", reply_markup=kb)
-        return VIP_HEALTH_ANSWERING
+            if question.get("placeholder"):
+                text += f"\n\n💡 {question['placeholder']}"
+            num_range = question.get("number_range")
+            if num_range:
+                text += f"\n(محدوده مجاز: {num_range['min']} تا {num_range['max']})"
+            await context.bot.send_message(chat_id=uid, text=text, parse_mode="HTML", reply_markup=kb)
+            return VIP_HEALTH_ANSWERING
+        elif q_type == "multi_select":
+            session["multi_select_temp"] = []
+            kb = build_multi_select_keyboard(options, [], question.get("confirm_button", "✅ تأیید و ادامه"))
+            await context.bot.send_message(chat_id=uid, text=text, parse_mode="HTML", reply_markup=kb)
+            return VIP_HEALTH_MULTI
+        else:
+            kb = build_option_keyboard(options)
+            await context.bot.send_message(chat_id=uid, text=text, parse_mode="HTML", reply_markup=kb)
+            return VIP_HEALTH_ANSWERING
+    except Exception as e:
+        logger.exception(f"خطا در send_vip_question: {e}")
+        return MAIN_MENU
 
 async def handle_vip_answer(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    uid = update.effective_user.id
-    user_text = update.message.text.strip()
-    if user_text == "❌ انصراف و بازگشت":
-        return await cancel_vip(update, context)
-    session = get_session(uid)
-    qid = session.get("current_question_id")
-    if not qid:
-        return MAIN_MENU
-    question = get_question_by_id(qid)
-    if not question:
-        return MAIN_MENU
-    answers = session["answers"]
-    q_type = question["type"]
-    variable = question["variable"]
-    if session.get("waiting_for_other_text"):
-        other_var = session.get("other_text_variable", variable + "_other")
-        answers[other_var] = user_text
-        session["waiting_for_other_text"] = False
-        session["other_text_variable"] = None
-        await update.message.reply_text(f"✅ ثبت شد: {user_text}")
-        return await advance_vip(uid, context)
-    if q_type == "text_input" and question.get("options"):
-        value = find_option_value(question["options"], user_text)
-        if value:
+    try:
+        uid = update.effective_user.id
+        user_text = update.message.text.strip()
+        if user_text == "❌ انصراف و بازگشت":
+            return await cancel_vip(update, context)
+        session = get_session(uid)
+        qid = session.get("current_question_id")
+        if not qid:
+            return MAIN_MENU
+        question = get_question_by_id(qid)
+        if not question:
+            return MAIN_MENU
+        answers = session["answers"]
+        q_type = question["type"]
+        variable = question["variable"]
+        if session.get("waiting_for_other_text"):
+            other_var = session.get("other_text_variable", variable + "_other")
+            answers[other_var] = user_text
+            session["waiting_for_other_text"] = False
+            session["other_text_variable"] = None
+            await update.message.reply_text(f"✅ ثبت شد: {user_text}")
+            return await advance_vip(uid, context)
+        if q_type == "text_input" and question.get("options"):
+            value = find_option_value(question["options"], user_text)
+            if value:
+                answers[variable] = value
+                return await advance_vip(uid, context)
+            answers[variable] = user_text
+            return await advance_vip(uid, context)
+        if q_type == "text_input":
+            answers[variable] = user_text
+            return await advance_vip(uid, context)
+        if q_type == "number_input":
+            cleaned = user_text.replace(",", ".").replace("٫", ".").replace("،", ".")
+            persian_digits = "۰۱۲۳۴۵۶۷۸۹"
+            arabic_digits = "٠١٢٣٤٥٦٧٨٩"
+            for i, (p, a) in enumerate(zip(persian_digits, arabic_digits)):
+                cleaned = cleaned.replace(p, str(i)).replace(a, str(i))
+            try:
+                num_val = float(cleaned)
+            except ValueError:
+                await update.message.reply_text("❌ لطفاً یک عدد معتبر وارد کن.")
+                return VIP_HEALTH_ANSWERING
+            num_range = question.get("number_range")
+            if num_range:
+                if num_val < num_range["min"] or num_val > num_range["max"]:
+                    await update.message.reply_text(f"❌ عدد باید بین {num_range['min']} و {num_range['max']} باشه.")
+                    return VIP_HEALTH_ANSWERING
+            answers[variable] = num_val
+            return await advance_vip(uid, context)
+        if q_type == "inline_button":
+            options = get_options_for_question(question, answers)
+            value = find_option_value(options, user_text)
+            if value is None:
+                await update.message.reply_text("⚠️ لطفاً یکی از گزینه‌ها رو انتخاب کن.")
+                return VIP_HEALTH_ANSWERING
+            if value == "_other" and question.get("has_other_text"):
+                answers[variable] = "_other"
+                session["waiting_for_other_text"] = True
+                session["other_text_variable"] = variable + "_detail"
+                await update.message.reply_text("✏️ لطفاً بنویس:", reply_markup=cancel_only_keyboard())
+                return VIP_HEALTH_ANSWERING
             answers[variable] = value
             return await advance_vip(uid, context)
-        answers[variable] = user_text
-        return await advance_vip(uid, context)
-    if q_type == "text_input":
-        answers[variable] = user_text
-        return await advance_vip(uid, context)
-    if q_type == "number_input":
-        cleaned = user_text.replace(",", ".").replace("٫", ".").replace("،", ".")
-        persian_digits = "۰۱۲۳۴۵۶۷۸۹"
-        arabic_digits = "٠١٢٣٤٥٦٧٨٩"
-        for i, (p, a) in enumerate(zip(persian_digits, arabic_digits)):
-            cleaned = cleaned.replace(p, str(i)).replace(a, str(i))
-        try:
-            num_val = float(cleaned)
-        except ValueError:
-            await update.message.reply_text("❌ لطفاً یک عدد معتبر وارد کن.")
-            return VIP_HEALTH_ANSWERING
-        num_range = question.get("number_range")
-        if num_range:
-            if num_val < num_range["min"] or num_val > num_range["max"]:
-                await update.message.reply_text(f"❌ عدد باید بین {num_range['min']} و {num_range['max']} باشه.")
-                return VIP_HEALTH_ANSWERING
-        answers[variable] = num_val
-        return await advance_vip(uid, context)
-    if q_type == "inline_button":
+        return VIP_HEALTH_ANSWERING
+    except Exception as e:
+        logger.exception(f"خطا در handle_vip_answer: {e}")
+        return MAIN_MENU
+
+async def handle_vip_multi(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    try:
+        uid = update.effective_user.id
+        user_text = update.message.text.strip()
+        if user_text == "❌ انصراف و بازگشت":
+            return await cancel_vip(update, context)
+        session = get_session(uid)
+        qid = session.get("current_question_id")
+        question = get_question_by_id(qid)
+        if not question:
+            return MAIN_MENU
+        answers = session["answers"]
         options = get_options_for_question(question, answers)
+        confirm_text = question.get("confirm_button", "✅ تأیید و ادامه")
+        if user_text == confirm_text:
+            final = session["multi_select_temp"] if session["multi_select_temp"] else ["none"]
+            answers[question["variable"]] = final
+            session["multi_select_temp"] = []
+            if final != ["none"]:
+                selected_texts = [opt["text"] for opt in options if opt["value"] in final]
+                if selected_texts:
+                    await update.message.reply_text("✅ انتخاب‌های شما:\n" + "\n".join(f"  • {t}" for t in selected_texts))
+            if "_other" in final and question.get("has_other_text"):
+                session["waiting_for_other_text"] = True
+                session["other_text_variable"] = question["variable"] + "_detail"
+                await update.message.reply_text("✏️ لطفاً جزئیات رو بنویس:", reply_markup=cancel_only_keyboard())
+                return VIP_HEALTH_ANSWERING
+            return await advance_vip(uid, context)
         value = find_option_value(options, user_text)
         if value is None:
             await update.message.reply_text("⚠️ لطفاً یکی از گزینه‌ها رو انتخاب کن.")
-            return VIP_HEALTH_ANSWERING
-        if value == "_other" and question.get("has_other_text"):
-            answers[variable] = "_other"
-            session["waiting_for_other_text"] = True
-            session["other_text_variable"] = variable + "_detail"
-            await update.message.reply_text("✏️ لطفاً بنویس:", reply_markup=cancel_only_keyboard())
-            return VIP_HEALTH_ANSWERING
-        answers[variable] = value
-        return await advance_vip(uid, context)
-    return VIP_HEALTH_ANSWERING
-
-async def handle_vip_multi(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    uid = update.effective_user.id
-    user_text = update.message.text.strip()
-    if user_text == "❌ انصراف و بازگشت":
-        return await cancel_vip(update, context)
-    session = get_session(uid)
-    qid = session.get("current_question_id")
-    question = get_question_by_id(qid)
-    if not question:
-        return MAIN_MENU
-    answers = session["answers"]
-    options = get_options_for_question(question, answers)
-    confirm_text = question.get("confirm_button", "✅ تأیید و ادامه")
-    if user_text == confirm_text:
-        final = session["multi_select_temp"] if session["multi_select_temp"] else ["none"]
-        answers[question["variable"]] = final
-        session["multi_select_temp"] = []
-        if final != ["none"]:
-            selected_texts = [opt["text"] for opt in options if opt["value"] in final]
-            if selected_texts:
-                await update.message.reply_text("✅ انتخاب‌های شما:\n" + "\n".join(f"  • {t}" for t in selected_texts))
-        if "_other" in final and question.get("has_other_text"):
-            session["waiting_for_other_text"] = True
-            session["other_text_variable"] = question["variable"] + "_detail"
-            await update.message.reply_text("✏️ لطفاً جزئیات رو بنویس:", reply_markup=cancel_only_keyboard())
-            return VIP_HEALTH_ANSWERING
-        return await advance_vip(uid, context)
-    value = find_option_value(options, user_text)
-    if value is None:
-        await update.message.reply_text("⚠️ لطفاً یکی از گزینه‌ها رو انتخاب کن.")
-        return VIP_HEALTH_MULTI
-    temp = session["multi_select_temp"]
-    exclusive = {"none", "all_normal", "nothing", "healthy", "dont_remember"}
-    if value in exclusive:
-        session["multi_select_temp"] = [value]
-    else:
-        for ev in exclusive:
-            if ev in temp:
-                temp.remove(ev)
-        if value in temp:
-            temp.remove(value)
+            return VIP_HEALTH_MULTI
+        temp = session["multi_select_temp"]
+        exclusive = {"none", "all_normal", "nothing", "healthy", "dont_remember"}
+        if value in exclusive:
+            session["multi_select_temp"] = [value]
         else:
-            temp.append(value)
-    progress = calculate_progress(qid, answers)
-    pet_name = answers.get("pet_name", "پتت")
-    q_text = question["text"].replace("{pet_name}", pet_name)
-    text = f"{progress}\n\n{q_text}"
-    if question.get("micro_copy"):
-        text += f"\n\n{question['micro_copy']}"
-    kb = build_multi_select_keyboard(options, session["multi_select_temp"], confirm_text)
-    await update.message.reply_text(text=text, reply_markup=kb, parse_mode="HTML")
-    return VIP_HEALTH_MULTI
+            for ev in exclusive:
+                if ev in temp:
+                    temp.remove(ev)
+            if value in temp:
+                temp.remove(value)
+            else:
+                temp.append(value)
+        progress = calculate_progress(qid, answers)
+        pet_name = answers.get("pet_name", "پتت")
+        q_text = question["text"].replace("{pet_name}", pet_name)
+        text = f"{progress}\n\n{q_text}"
+        if question.get("micro_copy"):
+            text += f"\n\n{question['micro_copy']}"
+        kb = build_multi_select_keyboard(options, session["multi_select_temp"], confirm_text)
+        await update.message.reply_text(text=text, reply_markup=kb, parse_mode="HTML")
+        return VIP_HEALTH_MULTI
+    except Exception as e:
+        logger.exception(f"خطا در handle_vip_multi: {e}")
+        return MAIN_MENU
 
 async def advance_vip(uid: int, context: ContextTypes.DEFAULT_TYPE) -> int:
-    session = get_session(uid)
-    current_id = session["current_question_id"]
-    answers = session["answers"]
-    next_id = get_next_question_id(current_id, answers)
-    if next_id is None:
-        return await finish_vip_health(uid, context)
-    else:
-        session["prev_question_id"] = current_id
-        session["current_question_id"] = next_id
-        return await send_vip_question(uid, context)
+    try:
+        session = get_session(uid)
+        current_id = session["current_question_id"]
+        answers = session["answers"]
+        next_id = get_next_question_id(current_id, answers)
+        if next_id is None:
+            return await finish_vip_health(uid, context)
+        else:
+            session["prev_question_id"] = current_id
+            session["current_question_id"] = next_id
+            return await send_vip_question(uid, context)
+    except Exception as e:
+        logger.exception(f"خطا در advance_vip: {e}")
+        return MAIN_MENU
 
 async def finish_vip_health(uid: int, context: ContextTypes.DEFAULT_TYPE) -> int:
-    session = get_session(uid)
-    pet_id = session.get("selected_pet_id")
-    if pet_id:
-        await save_health_report(uid, pet_id, "vip", session["answers"])
-    # ارسال به ادمین (مثل قبل)
     try:
-        chat = await context.bot.get_chat(uid)
-        full_name = chat.full_name or "ناشناس"
-        username = f"@{chat.username}" if chat.username else "ندارد"
-    except:
-        full_name = "خطا"
-        username = "خطا"
-    prompt = generate_health_prompt(session["answers"])
-    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    header = (
-        f"🔔 ارزیابی VIP جدید دریافت شد!\n"
-        f"{'─'*30}\n"
-        f"👤 نام: {full_name}\n"
-        f"🆔 یوزرنیم: {username}\n"
-        f"🔢 Chat ID: {uid}\n"
-        f"⏰ زمان: {now}\n"
-        f"📊 تعداد پاسخ‌ها: {len(session['answers'])}\n"
-        f"{'─'*30}\n"
-        f"💡 برای ارسال PDF، روی این پیام Reply کن.\n"
-        f"{'─'*30}\n"
-    )
-    full_msg = header + "\n" + prompt
-    for i in range(0, len(full_msg), 4000):
-        await context.bot.send_message(chat_id=ADMIN_CHAT_ID, text=full_msg[i:i+4000])
-    await context.bot.send_message(
-        chat_id=uid,
-        text="✅ ممنون! گزارش سلامت تخصصی پتت داره آماده می‌شه.\n🕐 تا ۲۴ ساعت آینده برات ارسال میشه.",
-        reply_markup=get_dynamic_keyboard("gold")  # بعداً باید سطح واقعی رو بفرستیم
-    )
-    reset_session(uid)
-    return MAIN_MENU
+        session = get_session(uid)
+        pet_id = session.get("selected_pet_id")
+        if pet_id:
+            await save_health_report(uid, pet_id, "vip", session["answers"])
+        # ارسال به ادمین (مثل قبل)
+        try:
+            chat = await context.bot.get_chat(uid)
+            full_name = chat.full_name or "ناشناس"
+            username = f"@{chat.username}" if chat.username else "ندارد"
+        except:
+            full_name = "خطا"
+            username = "خطا"
+        prompt = generate_health_prompt(session["answers"])
+        now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        header = (
+            f"🔔 ارزیابی VIP جدید دریافت شد!\n"
+            f"{'─'*30}\n"
+            f"👤 نام: {full_name}\n"
+            f"🆔 یوزرنیم: {username}\n"
+            f"🔢 Chat ID: {uid}\n"
+            f"⏰ زمان: {now}\n"
+            f"📊 تعداد پاسخ‌ها: {len(session['answers'])}\n"
+            f"{'─'*30}\n"
+            f"💡 برای ارسال PDF، روی این پیام Reply کن.\n"
+            f"{'─'*30}\n"
+        )
+        full_msg = header + "\n" + prompt
+        for i in range(0, len(full_msg), 4000):
+            await context.bot.send_message(chat_id=ADMIN_CHAT_ID, text=full_msg[i:i+4000])
+        await context.bot.send_message(
+            chat_id=uid,
+            text="✅ ممنون! گزارش سلامت تخصصی پتت داره آماده می‌شه.\n🕐 تا ۲۴ ساعت آینده برات ارسال میشه.",
+            reply_markup=get_dynamic_keyboard("gold")  # بعداً باید سطح واقعی رو بفرستیم
+        )
+        reset_session(uid)
+        return MAIN_MENU
+    except Exception as e:
+        logger.exception(f"خطا در finish_vip_health: {e}")
+        return MAIN_MENU
 
 async def cancel_vip(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    uid = update.effective_user.id
-    reset_session(uid)
-    await update.message.reply_text("❌ ارزیابی لغو شد.")
-    return await show_main_menu(update, context)
+    try:
+        uid = update.effective_user.id
+        reset_session(uid)
+        await update.message.reply_text("❌ ارزیابی لغو شد.")
+        return await show_main_menu(update, context)
+    except Exception as e:
+        logger.exception(f"خطا در cancel_vip: {e}")
+        return MAIN_MENU
 
 # ==================== منوی اصلی (مدیریت) ====================
 async def handle_main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    text = update.message.text.strip()
-    
-    # اگر کاربر /start زد، به تابع شروع هدایت کن
-    if text == "/start":
-        return await cmd_start(update, context)
-    
-    uid = update.effective_user.id
-    user = await get_user(uid)
-    level = user["level"] if user else "guest"
-    
-    if text == BTN_MEMBERSHIP:
-        # نمایش وضعیت و امکان ارتقا
-        if level == "guest":
-            await membership_gold(update, context)
-            return REG_BRONZE_CONTACT
-        elif level == "bronze":
-            # پیشنهاد ثبت پت
-            await update.message.reply_text("شما در سطح برنز هستید. برای ارتقا به نقره، یک پت ثبت کنید.")
-            return await start_add_pet(update, context)
-        elif level == "silver":
-            await update.message.reply_text("شما در سطح نقره هستید. برای ارتقا به طلا، اطلاعات تکمیلی را وارد کنید.")
-            return await start_gold(update, context)
-        else:
-            await update.message.reply_text("شما عضو VIP طلایی هستید. از تمام خدمات استفاده کنید.")
+    try:
+        text = update.message.text.strip()
+        
+        # اگر کاربر /start زد، به تابع شروع هدایت کن
+        if text == "/start":
+            return await cmd_start(update, context)
+        
+        uid = update.effective_user.id
+        user = await get_user(uid)
+        level = user["level"] if user else "guest"
+        
+        if text == BTN_MEMBERSHIP:
+            # نمایش وضعیت و امکان ارتقا
+            if level == "guest":
+                await membership_gold(update, context)
+                return REG_BRONZE_CONTACT
+            elif level == "bronze":
+                # پیشنهاد ثبت پت
+                await update.message.reply_text("شما در سطح برنز هستید. برای ارتقا به نقره، یک پت ثبت کنید.")
+                return await start_add_pet(update, context)
+            elif level == "silver":
+                await update.message.reply_text("شما در سطح نقره هستید. برای ارتقا به طلا، اطلاعات تکمیلی را وارد کنید.")
+                return await start_gold(update, context)
+            else:
+                await update.message.reply_text("شما عضو VIP طلایی هستید. از تمام خدمات استفاده کنید.")
+                return MAIN_MENU
+        elif text == BTN_BASIC_REPORT:
+            return await start_basic_health(update, context)
+        elif text == BTN_VIP_REPORT:
+            return await start_vip_health(update, context)
+        elif text == BTN_MY_PETS:
+            # نمایش لیست پت‌ها و امکان اضافه کردن
+            pets = await get_user_pets(uid)
+            if pets:
+                msg = "🐾 پت‌های شما:\n" + "\n".join([f"- {p['name']} ({p['type']})" for p in pets])
+            else:
+                msg = "شما هنوز پتی ثبت نکرده‌اید."
+            msg += "\n\nبرای اضافه کردن پت جدید، از گزینه زیر استفاده کنید."
+            keyboard = [[KeyboardButton("➕ افزودن پت جدید")], [BTN_BACK]]
+            await update.message.reply_text(msg, reply_markup=ReplyKeyboardMarkup(keyboard, resize_keyboard=True))
             return MAIN_MENU
-    elif text == BTN_BASIC_REPORT:
-        return await start_basic_health(update, context)
-    elif text == BTN_VIP_REPORT:
-        return await start_vip_health(update, context)
-    elif text == BTN_MY_PETS:
-        # نمایش لیست پت‌ها و امکان اضافه کردن
-        pets = await get_user_pets(uid)
-        if pets:
-            msg = "🐾 پت‌های شما:\n" + "\n".join([f"- {p['name']} ({p['type']})" for p in pets])
+        elif text == "➕ افزودن پت جدید":
+            return await start_add_pet(update, context)
+        elif text == BTN_BACK:
+            return await show_main_menu(update, context)
+        elif text in MENU_RESPONSES:
+            await update.message.reply_text(MENU_RESPONSES[text], parse_mode="HTML")
+            return MAIN_MENU
         else:
-            msg = "شما هنوز پتی ثبت نکرده‌اید."
-        msg += "\n\nبرای اضافه کردن پت جدید، از گزینه زیر استفاده کنید."
-        keyboard = [[KeyboardButton("➕ افزودن پت جدید")], [BTN_BACK]]
-        await update.message.reply_text(msg, reply_markup=ReplyKeyboardMarkup(keyboard, resize_keyboard=True))
-        return MAIN_MENU
-    elif text == "➕ افزودن پت جدید":
-        return await start_add_pet(update, context)
-    elif text == BTN_BACK:
-        return await show_main_menu(update, context)
-    elif text in MENU_RESPONSES:
-        await update.message.reply_text(MENU_RESPONSES[text], parse_mode="HTML")
-        return MAIN_MENU
-    else:
-        await update.message.reply_text("🤔 متوجه نشدم! از دکمه‌های منو استفاده کن.")
+            await update.message.reply_text("🤔 متوجه نشدم! از دکمه‌های منو استفاده کن.")
+            return MAIN_MENU
+    except Exception as e:
+        logger.exception(f"خطا در handle_main_menu: {e}")
         return MAIN_MENU
 
 # ==================== پشتیبانی و آمار ====================
 async def cmd_stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.effective_user.id != ADMIN_CHAT_ID:
-        await update.message.reply_text("⛔ فقط ادمین.")
-        return
-    active = len(get_all_sessions())
-    await update.message.reply_text(f"📊 آمار بات\n{'─'*25}\n👥 Session‌های فعال: {active}", parse_mode="HTML")
+    try:
+        if update.effective_user.id != ADMIN_CHAT_ID:
+            await update.message.reply_text("⛔ فقط ادمین.")
+            return
+        active = len(get_all_sessions())
+        await update.message.reply_text(f"📊 آمار بات\n{'─'*25}\n👥 Session‌های فعال: {active}", parse_mode="HTML")
+    except Exception as e:
+        logger.exception(f"خطا در cmd_stats: {e}")
 
 async def post_init(application):
-    commands = [
-        BotCommand("start", "🐾 شروع ربات"),
-        BotCommand("stats", "📊 آمار (ادمین)"),
-    ]
-    await application.bot.set_my_commands(commands)
+    try:
+        commands = [
+            BotCommand("start", "🐾 شروع ربات"),
+            BotCommand("stats", "📊 آمار (ادمین)"),
+        ]
+        await application.bot.set_my_commands(commands)
+    except Exception as e:
+        logger.exception(f"خطا در post_init: {e}")
 
 # ==================== هندلر ادمین ====================
 async def admin_reply_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    msg = update.message
-    if msg.chat_id != ADMIN_CHAT_ID:
-        return
-    if not msg.reply_to_message:
-        return
-    original = msg.reply_to_message.text or ""
-    chat_id = None
-    for line in original.split("\n"):
-        if "Chat ID:" in line:
-            try:
-                chat_id = int(line.split(":")[-1].strip())
-            except ValueError:
-                pass
-    if not chat_id:
-        await msg.reply_text("⚠️ Chat ID پیدا نشد!")
-        return
-    caption = "📄 گزارش سلامت اختصاصی پت شما آماده شد! 🎉\n\nاگه سؤالی داشتی /start بزن."
     try:
+        msg = update.message
+        if msg.chat_id != ADMIN_CHAT_ID:
+            return
+        if not msg.reply_to_message:
+            return
+
+        original = msg.reply_to_message.text or ""
+        chat_id = None
+        for line in original.split("\n"):
+            if "Chat ID:" in line:
+                try:
+                    chat_id = int(line.split(":")[-1].strip())
+                except ValueError:
+                    pass
+
+        if not chat_id:
+            await msg.reply_text("⚠️ Chat ID پیدا نشد!")
+            return
+
+        caption = "📄 گزارش سلامت اختصاصی پت شما آماده شد! 🎉\n\nاگه سؤالی داشتی /start بزن."
+
         if msg.document:
             await context.bot.send_document(chat_id=chat_id, document=msg.document.file_id, caption=caption)
             await msg.reply_text(f"✅ فایل به کاربر {chat_id} ارسال شد!")
@@ -2332,7 +2493,7 @@ async def admin_reply_handler(update: Update, context: ContextTypes.DEFAULT_TYPE
             await context.bot.send_message(chat_id=chat_id, text=f"📩 پیام از تیم Petinex:\n\n{msg.text}")
             await msg.reply_text(f"✅ پیام به کاربر {chat_id} ارسال شد!")
     except Exception as e:
-        await msg.reply_text(f"❌ خطا: {e}")
+        logger.exception(f"خطا در admin_reply_handler: {e}")
 
 # ==================== main ====================
 def main():
@@ -2373,7 +2534,7 @@ def main():
                 MessageHandler(filters.TEXT & ~filters.COMMAND, handle_gold_registration),
             ],
             MAIN_MENU: [
-                MessageHandler(filters.TEXT & ~filters.COMMAND, handle_main_menu),
+                MessageHandler(filters.TEXT, handle_main_menu),
             ],
             BASIC_HEALTH: [
                 MessageHandler(filters.TEXT & ~filters.COMMAND, basic_select_pet),
