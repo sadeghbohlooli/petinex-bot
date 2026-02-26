@@ -2236,8 +2236,13 @@ async def cancel_vip(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
 
 # ==================== منوی اصلی (مدیریت) ====================
 async def handle_main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    uid = update.effective_user.id
     text = update.message.text.strip()
+    
+    # اگر کاربر /start زد، به تابع شروع هدایت کن
+    if text == "/start":
+        return await cmd_start(update, context)
+    
+    uid = update.effective_user.id
     user = await get_user(uid)
     level = user["level"] if user else "guest"
     
