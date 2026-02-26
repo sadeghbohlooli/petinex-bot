@@ -41,129 +41,188 @@ VIP_HEALTH = 30
 VIP_HEALTH_ANSWERING = 31
 VIP_HEALTH_MULTI = 32
 
-# ==================== دیتابیس ====================
-import sqlite3
-import aiosqlite
+# ==================== دیتابیس (PostgreSQL) ====================
+import psycopg2
+import psycopg2.extras
+import os
 import json
 
-DB_PATH = "petinex.db"
+def get_db_connection():
+    """یک اتصال جدید به دیتابیس PostgreSQL برمی‌گرداند"""
+    DATABASE_URL = os.environ.get('DATABASE_URL')
+    if not DATABASE_URL:
+        raise Exception("متغیر محیطی DATABASE_URL تنظیم نشده است!")
+    return psycopg2.connect(DATABASE_URL)
 
 def init_db():
-    """ایجاد جداول اگر وجود نداشته باشند (همزمان - فقط برای راه‌اندازی اولیه)"""
-    conn = sqlite3.connect(DB_PATH)
-    c = conn.cursor()
-    # جدول کاربران
-    c.execute("""
-        CREATE TABLE IF NOT EXISTS users (
-            user_id INTEGER PRIMARY KEY,
-            username TEXT,
-            first_name TEXT,
-            last_name TEXT,
-            phone TEXT,
-            email TEXT,
-            city TEXT,
-            district TEXT,
-            level TEXT DEFAULT 'guest',
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            is_first_100 BOOLEAN DEFAULT 0
-        )
-    """)
-    # جدول پت‌ها
-    c.execute("""
-        CREATE TABLE IF NOT EXISTS pets (
-            pet_id INTEGER PRIMARY KEY AUTOINCREMENT,
-            user_id INTEGER,
-            name TEXT,
-            type TEXT,
-            breed TEXT,
-            age_group TEXT,
-            weight REAL,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            FOREIGN KEY(user_id) REFERENCES users(user_id)
-        )
-    """)
-    # جدول گزارش‌های سلامت
-    c.execute("""
-        CREATE TABLE IF NOT EXISTS health_reports (
-            report_id INTEGER PRIMARY KEY AUTOINCREMENT,
-            user_id INTEGER,
-            pet_id INTEGER,
-            report_type TEXT,
-            answers TEXT,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            FOREIGN KEY(user_id) REFERENCES users(user_id),
-            FOREIGN KEY(pet_id) REFERENCES pets(pet_id)
-        )
-    """)
-    conn.commit()
-    conn.close()
+    """ایجاد جداول اگر وجود نداشته باشند"""
+    conn = None
+    try:
+        conn = get_db_connection()
+        cur = conn.cursor()
+        
+        # جدول کاربران
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS users (
+                user_id BIGINT PRIMARY KEY,
+                username TEXT,
+                first_name TEXT,
+                last_name TEXT,
+                phone TEXT,
+                email TEXT,
+                city TEXT,
+                district TEXT,
+                level TEXT DEFAULT 'guest',
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                is_first_100 BOOLEAN DEFAULT FALSE
+            )
+        """)
+        
+        # جدول پت‌ها
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS pets (
+                pet_id SERIAL PRIMARY KEY,
+                user_id BIGINT REFERENCES users(user_id) ON DELETE CASCADE,
+                name TEXT,
+                type TEXT,
+                breed TEXT,
+                age_group TEXT,
+                weight REAL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        
+        # جدول گزارش‌های سلامت
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS health_reports (
+                report_id SERIAL PRIMARY KEY,
+                user_id BIGINT REFERENCES users(user_id) ON DELETE CASCADE,
+                pet_id INTEGER REFERENCES pets(pet_id) ON DELETE CASCADE,
+                report_type TEXT,
+                answers TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        
+        conn.commit()
+        cur.close()
+        print("✅ جداول PostgreSQL با موفقیت ایجاد شدند.")
+    except Exception as e:
+        print(f"❌ خطا در ایجاد جداول: {e}")
+    finally:
+        if conn:
+            conn.close()
 
-# توابع کمکی دیتابیس (با aiosqlite برای استفاده در حین کار)
+# توابع کمکی دیتابیس
 async def get_user(user_id: int):
-    async with aiosqlite.connect(DB_PATH) as db:
-        db.row_factory = aiosqlite.Row
-        cursor = await db.execute("SELECT * FROM users WHERE user_id = ?", (user_id,))
-        return await cursor.fetchone()
+    conn = get_db_connection()
+    try:
+        cur = conn.cursor(cursor_factory=psycopg2.extras.DictRow)
+        cur.execute("SELECT * FROM users WHERE user_id = %s", (user_id,))
+        row = cur.fetchone()
+        return dict(row) if row else None
+    finally:
+        conn.close()
 
 async def create_user(user_id: int, username: str, first_name: str, last_name: str = ""):
-    async with aiosqlite.connect(DB_PATH) as db:
-        await db.execute("""
-            INSERT OR IGNORE INTO users (user_id, username, first_name, last_name, level)
-            VALUES (?, ?, ?, ?, 'guest')
+    conn = get_db_connection()
+    try:
+        cur = conn.cursor()
+        cur.execute("""
+            INSERT INTO users (user_id, username, first_name, last_name, level)
+            VALUES (%s, %s, %s, %s, 'guest')
+            ON CONFLICT (user_id) DO NOTHING
         """, (user_id, username, first_name, last_name))
-        await db.commit()
+        conn.commit()
+    finally:
+        conn.close()
 
 async def update_user_level(user_id: int, level: str):
-    async with aiosqlite.connect(DB_PATH) as db:
-        await db.execute("UPDATE users SET level = ? WHERE user_id = ?", (level, user_id))
-        await db.commit()
+    conn = get_db_connection()
+    try:
+        cur = conn.cursor()
+        cur.execute("UPDATE users SET level = %s WHERE user_id = %s", (level, user_id))
+        conn.commit()
+    finally:
+        conn.close()
 
 async def update_user_phone(user_id: int, phone: str):
-    async with aiosqlite.connect(DB_PATH) as db:
-        await db.execute("UPDATE users SET phone = ? WHERE user_id = ?", (phone, user_id))
-        await db.commit()
+    conn = get_db_connection()
+    try:
+        cur = conn.cursor()
+        cur.execute("UPDATE users SET phone = %s WHERE user_id = %s", (phone, user_id))
+        conn.commit()
+    finally:
+        conn.close()
 
 async def update_user_email_city(user_id: int, email: str, city: str, district: str = ""):
-    async with aiosqlite.connect(DB_PATH) as db:
-        await db.execute("UPDATE users SET email = ?, city = ?, district = ? WHERE user_id = ?", (email, city, district, user_id))
-        await db.commit()
+    conn = get_db_connection()
+    try:
+        cur = conn.cursor()
+        cur.execute("UPDATE users SET email = %s, city = %s, district = %s WHERE user_id = %s", 
+                    (email, city, district, user_id))
+        conn.commit()
+    finally:
+        conn.close()
 
 async def add_pet(user_id: int, name: str, pet_type: str, breed: str, age_group: str, weight: float = None):
-    async with aiosqlite.connect(DB_PATH) as db:
-        cursor = await db.execute("""
+    conn = get_db_connection()
+    try:
+        cur = conn.cursor()
+        cur.execute("""
             INSERT INTO pets (user_id, name, type, breed, age_group, weight)
-            VALUES (?, ?, ?, ?, ?, ?)
+            VALUES (%s, %s, %s, %s, %s, %s)
+            RETURNING pet_id
         """, (user_id, name, pet_type, breed, age_group, weight))
-        await db.commit()
-        return cursor.lastrowid
+        pet_id = cur.fetchone()[0]
+        conn.commit()
+        return pet_id
+    finally:
+        conn.close()
 
 async def get_user_pets(user_id: int):
-    async with aiosqlite.connect(DB_PATH) as db:
-        db.row_factory = aiosqlite.Row
-        cursor = await db.execute("SELECT * FROM pets WHERE user_id = ? ORDER BY created_at", (user_id,))
-        return await cursor.fetchall()
+    conn = get_db_connection()
+    try:
+        cur = conn.cursor(cursor_factory=psycopg2.extras.DictRow)
+        cur.execute("SELECT * FROM pets WHERE user_id = %s ORDER BY created_at", (user_id,))
+        rows = cur.fetchall()
+        return [dict(row) for row in rows]
+    finally:
+        conn.close()
 
 async def count_users_before(user_id: int) -> int:
-    async with aiosqlite.connect(DB_PATH) as db:
-        cursor = await db.execute(
-            "SELECT COUNT(*) FROM users WHERE created_at < (SELECT created_at FROM users WHERE user_id = ?)",
-            (user_id,)
-        )
-        row = await cursor.fetchone()
-        return row[0] if row else 0
+    conn = get_db_connection()
+    try:
+        cur = conn.cursor()
+        cur.execute("""
+            SELECT COUNT(*) FROM users 
+            WHERE created_at < (SELECT created_at FROM users WHERE user_id = %s)
+        """, (user_id,))
+        count = cur.fetchone()[0]
+        return count
+    finally:
+        conn.close()
 
 async def mark_first_100(user_id: int):
-    async with aiosqlite.connect(DB_PATH) as db:
-        await db.execute("UPDATE users SET is_first_100 = 1 WHERE user_id = ?", (user_id,))
-        await db.commit()
+    conn = get_db_connection()
+    try:
+        cur = conn.cursor()
+        cur.execute("UPDATE users SET is_first_100 = TRUE WHERE user_id = %s", (user_id,))
+        conn.commit()
+    finally:
+        conn.close()
 
 async def save_health_report(user_id: int, pet_id: int, report_type: str, answers: dict):
-    async with aiosqlite.connect(DB_PATH) as db:
-        await db.execute("""
+    conn = get_db_connection()
+    try:
+        cur = conn.cursor()
+        cur.execute("""
             INSERT INTO health_reports (user_id, pet_id, report_type, answers)
-            VALUES (?, ?, ?, ?)
+            VALUES (%s, %s, %s, %s)
         """, (user_id, pet_id, report_type, json.dumps(answers, ensure_ascii=False)))
-        await db.commit()
+        conn.commit()
+    finally:
+        conn.close()
 
 # ==================== core/session.py ====================
 user_sessions = {}
