@@ -1888,17 +1888,21 @@ async def handle_gold_registration(update: Update, context: ContextTypes.DEFAULT
             await update.message.reply_text("📍 منطقه یا محله (اختیاری):", reply_markup=cancel_only_keyboard())
             return REG_GOLD
 
-        elif step == "district":
-            data = session["gold_data"]
-            email = data.get("email", "")
-            city = data.get("city", "")
-            district = user_text if user_text != "❌ انصراف و بازگشت" else ""
-            await update_user_email_city(uid, email, city, district)
-            await update_user_level(uid, "gold")
-            session.pop("gold_step", None)
-            session.pop("gold_data", None)
-            await update.message.reply_text("🎉 تبریک! شما عضو VIP طلایی پتینکس شدید. به همه خدمات دسترسی دارید!")
-            return await show_main_menu(update, context)
+            elif step == "district":
+        data = session["gold_data"]
+        email = data.get("email", "")
+        city = data.get("city", "")
+        district = user_text if user_text != "❌ انصراف و بازگشت" else ""
+        await update_user_email_city(uid, email, city, district)
+        await update_user_level(uid, "gold")
+        session.pop("gold_step", None)
+        session.pop("gold_data", None)
+        # نمایش مستقیم منوی طلایی
+        await update.message.reply_text(
+            "🎉 تبریک! شما عضو VIP طلایی پتینکس شدید. به همه خدمات دسترسی دارید!",
+            reply_markup=get_dynamic_keyboard("gold")
+        )
+        return MAIN_MENU
 
         return REG_GOLD
     except Exception as e:
