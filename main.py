@@ -2398,19 +2398,34 @@ async def handle_main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         user = await get_user(uid)
         level = user["level"] if user else "guest"
         
+        # لاگ برای دیباگ
+        if user:
+            logger.info(f"کاربر {uid} با سطح {level} دکمه {text} را زد.")
+        else:
+            logger.error(f"کاربر {uid} در دیتابیس یافت نشد!")
+        
         if text == BTN_MEMBERSHIP:
-            # نمایش وضعیت و امکان ارتقا
+            # اگر کاربر یافت نشد، به عنوان مهمان در نظر بگیر
+            if user is None:
+                logger.error(f"کاربر {uid} در دیتابیس یافت نشد! به عنوان مهمان در نظر گرفته می‌شود.")
+                await membership_gold(update, context)
+                return REG_BRONZE_CONTACT
+
+            # fallback: اگر ایمیل دارد ولی سطح طلایی نیست، تصحیح کن
+            if level != 'gold' and user.get('email'):
+                logger.info(f"کاربر {uid} ایمیل دارد اما سطح آن {level} است. تصحیح به gold.")
+                level = 'gold'
+
             if level == "guest":
                 await membership_gold(update, context)
                 return REG_BRONZE_CONTACT
             elif level == "bronze":
-                # پیشنهاد ثبت پت
                 await update.message.reply_text("شما در سطح برنز هستید. برای ارتقا به نقره، یک پت ثبت کنید.")
                 return await start_add_pet(update, context)
             elif level == "silver":
                 await update.message.reply_text("شما در سطح نقره هستید. برای ارتقا به طلا، اطلاعات تکمیلی را وارد کنید.")
                 return await start_gold(update, context)
-            else:
+            else:  # gold
                 await update.message.reply_text("شما عضو VIP طلایی هستید. از تمام خدمات استفاده کنید.")
                 return MAIN_MENU
         elif text == BTN_BASIC_REPORT:
